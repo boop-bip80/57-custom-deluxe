@@ -156,9 +156,9 @@ class Panel:
         self.xcal = self._cal(xspec, self.gx, "bottom", "x")
         self.ycal = self._cal(yspec, self.gy, "left", "y")
         self.mask = self._gridmask()
+        self.clean = self._remove_grid()
         h, w = d.shape
         self.valid = np.ones((h, w), bool)
-        self.valid[self.mask] = False
         self.left, self.right = min(self.gx), max(self.gx)
         self.top, self.bot = min(self.gy), max(self.gy)
 
@@ -178,25 +178,62 @@ class Panel:
         return AxisCal(ticks, vals, f"{self.name}.{ax} (tick marks)")
 
     def _gridmask(self):
+        """Pixels that belong to a printed grid line: for every detected line the pixel columns/rows within 2 px of its
+        centre whose darkness along the line (median over the rows where the line itself is dark) exceeds 0.2.
+        Crisp 1-px lines (ECC83S) therefore mask exactly one pixel, softer lines two or three."""
         m = np.zeros(self.d.shape, bool)
-        h, w = self.d.shape
-        for p in self.gx:
-            lo, hi = int(math.floor(p - 1.0)), int(math.ceil(p + 1.0))
-            m[:, max(lo, 0):min(hi + 1, w)] = True
-        for p in self.gy:
-            lo, hi = int(math.floor(p - 1.0)), int(math.ceil(p + 1.0))
-            m[max(lo, 0):min(hi + 1, h), :] = True
         x0, y0, x1, y1 = self.frame
-        keep = np.zeros_like(m)
-        keep[y0 - 3:y1 + 4, x0 - 3:x1 + 4] = True
-        return m & keep
+        ya, yb, xa, xb = y0 - 3, y1 + 3, x0 - 3, x1 + 3
+        for p in self.gx:
+            c0 = int(round(p))
+            rows = np.nonzero(self.d[ya:yb + 1, c0] > 0.5)[0] + ya
+            for c in range(c0 - 2, c0 + 3):
+                if len(rows) and np.median(self.d[rows, c]) > 0.2:
+                    m[ya:yb + 1, c] = True
+        for p in self.gy:
+            r0 = int(round(p))
+            cols = np.nonzero(self.d[r0, xa:xb + 1] > 0.5)[0] + xa
+            for r in range(r0 - 2, r0 + 3):
+                if len(cols) and np.median(self.d[r, cols]) > 0.2:
+                    m[r, xa:xb + 1] = True
+        return m
+
+    def _remove_grid(self, evidence=0.35):
+        """Grid-free darkness image.  A grid pixel keeps its ink only if the pixel just outside the grid line (on either
+        side, perpendicular to it) is dark as well, i.e. a curve really crosses the line there; otherwise it is the
+        grid line alone and is cleared.  Where a curve runs along a line for several pixels the evidence is absent and
+        the curve is lost for that stretch; the tracker bridges such stretches."""
+        out = self.d.copy()
+        m = self.mask
+        h, w = m.shape
+        # vertical-line pixels (columns), then horizontal-line pixels (rows); crossings are handled by both passes
+        for axis in (1, 0):
+            mm = m if axis == 1 else m.T
+            dd = self.d if axis == 1 else self.d.T
+            oo = out if axis == 1 else out.T
+            for r in range(mm.shape[0]):
+                row = mm[r]
+                for a, b in runs(row):
+                    # a band of masked pixels along this axis; only treat bands narrower than 6 px as line bands
+                    if b - a + 1 > 5 or a < 1 or b > len(row) - 2:
+                        continue
+                    ev = max(dd[r, a - 1], dd[r, b + 1])
+                    for c in range(a, b + 1):
+                        oo[r, c] = min(oo[r, c], ev) if ev > evidence else 0.0
+        # grid-line intersections (masked in both directions) were skipped by both passes: no curve evidence there
+        xs = np.zeros(m.shape[1], bool)
+        ys = np.zeros(m.shape[0], bool)
+        xs[:] = m.sum(axis=0) > 0.5 * h
+        ys[:] = m.sum(axis=1) > 0.5 * w
+        out[np.ix_(ys, xs)] = 0.0
+        return out
 
     # data <-> pixel
     def pix(self, x, y):
-        return float(self.xcal.to_pix(x)), float(self.ycal.to_pix(y))
+        return self.xcal.to_pix(x), self.ycal.to_pix(y)
 
     def val(self, px, py):
-        return float(self.xcal.to_val(px)), float(self.ycal.to_val(py))
+        return self.xcal.to_val(px), self.ycal.to_val(py)
 
 
 # ------------------------------------------------------------------------------------------ ridge tracker
@@ -214,7 +251,7 @@ class Tracer:
         valid = panel.valid.copy()
         for (xa, ya, xb, yb) in ignore:                      # pixel rectangles (label text on top of a curve)
             valid[int(ya):int(yb) + 1, int(xa):int(xb) + 1] = False
-        self.num = panel.d * valid
+        self.num = panel.clean * valid
         self.den = valid.astype(float)
         x0, y0, x1, y1 = panel.frame
         self.box = (panel.left - 1.0, panel.top - 1.0, panel.right + 1.0, panel.bot + 1.0)
@@ -393,7 +430,7 @@ PALETTE = [(220, 30, 30), (30, 120, 220), (20, 160, 60), (230, 130, 0), (150, 40
            (200, 0, 130), (110, 110, 0), (90, 90, 90), (240, 60, 130), (0, 100, 0), (120, 70, 20), (0, 0, 160)]
 
 
-def draw_overlay(panel, curves, path, scale=3, pad=26):
+def draw_overlay(panel, curves, path, scale=4, pad=26):
     """curves: list of (label, Nx2 pixel array).  Draws the traced samples over the original image."""
     base = Image.open(panel.img_path).convert("RGB")
     x0, y0, x1, y1 = panel.frame
@@ -404,8 +441,92 @@ def draw_overlay(panel, curves, path, scale=3, pad=26):
         col = PALETTE[k % len(PALETTE)]
         for (x, y) in pts:
             cx, cy = (x - box[0] + 0.5) * scale, (y - box[1] + 0.5) * scale
-            dr.ellipse([cx - 1.4, cy - 1.4, cx + 1.4, cy + 1.4], fill=col)
+            dr.ellipse([cx - 2.0, cy - 2.0, cx + 2.0, cy + 2.0], fill=col)
         if len(pts):
             mid = pts[len(pts) // 2]
             dr.text(((mid[0] - box[0]) * scale + 6, (mid[1] - box[1]) * scale - 12), label, fill=col)
     crop.save(path, optimize=True)
+
+
+# ------------------------------------------------------------------------------------------ curve discovery
+def path_length(pts):
+    P = np.asarray(pts, float)
+    return float(np.hypot(*np.diff(P, axis=0).T).sum()) if len(P) > 1 else 0.0
+
+
+def _mark(covered, pts, max_link=35.0):
+    """mark pixels within 2 px of the traced polyline (links consecutive samples unless a long gap separates them)"""
+    P = np.asarray(pts, float)
+    for (x, y), (u, v) in zip(P[:-1], P[1:]):
+        n = max(int(math.hypot(u - x, v - y)), 1)
+        if n > max_link:
+            n = 1
+        for k in range(n + 1):
+            cx, cy = x + (u - x) * k / n, y + (v - y) * k / n
+            covered[max(int(cy) - 2, 0):int(cy) + 3, max(int(cx) - 2, 0):int(cx) + 3] = True
+
+
+def discover(panel, tracer, scan_axis, levels_px, lo_px, hi_px, min_len_px, min_density=0.45, ignore_boxes=(), **trace_kw):
+    """Find curves without hand-placed seeds: scan the interior along many lines (rows if scan_axis == 'h', columns if 'v'),
+    start the tracker at every dark run that is not already covered by a traced curve, keep traces that are long
+    enough and mostly made of real ridge samples (min_density = measured samples per pixel of path; text strokes
+    and hops between curves fail this).  Assignment of parameter labels is done by the caller from the ordering of
+    the result."""
+    covered = np.zeros(panel.d.shape, bool)
+    found = []
+    d = tracer.num
+    for lv in levels_px:
+        line = d[int(round(lv)), :] if scan_axis == "h" else d[:, int(round(lv))]
+        for a, b in runs(line > 0.4):
+            if not (lo_px < a and b < hi_px) or b - a + 1 > 4:
+                continue
+            c = (a + b) / 2.0
+            seed = (c, lv) if scan_axis == "h" else (lv, c)
+            sx, sy = int(round(seed[0])), int(round(seed[1]))
+            if covered[sy, sx]:
+                continue
+            if any(xa <= seed[0] <= xb and ya <= seed[1] <= yb for (xa, ya, xb, yb) in ignore_boxes):
+                continue
+            pts = tracer.trace(seed, **trace_kw)
+            if len(pts) < 8:
+                continue
+            _mark(covered, pts)
+            L = path_length(pts)
+            if L >= min_len_px and len(pts) / L >= min_density:
+                found.append(pts)
+    return dedupe(found)
+
+
+def _dense(pts, max_link=35.0):
+    P = np.asarray(pts, float)
+    out = [P[:1]]
+    for a, b in zip(P[:-1], P[1:]):
+        n = max(int(math.hypot(*(b - a)) * 2), 1)
+        if n > max_link * 2:
+            n = 1
+        out.append(a + (b - a) * (np.arange(1, n + 1) / n)[:, None])
+    return np.vstack(out)
+
+
+def dedupe(traces, radius=2.0, frac=0.5):
+    """Drop a trace when more than `frac` of its samples lie within `radius` px of an already kept (longer) trace."""
+    from scipy.spatial import cKDTree
+    kept, trees = [], []
+    for pts in sorted(traces, key=path_length, reverse=True):
+        P = np.asarray(pts, float)
+        dup = any((tr.query(P)[0] < radius).mean() > frac for tr in trees)
+        if not dup:
+            kept.append(pts)
+            trees.append(cKDTree(_dense(pts)))
+    return kept
+
+
+def eval_at(pts, axis, level):
+    """position along the other axis where the polyline crosses axis-level (axis 'y': crossing row; 'x': crossing column)"""
+    P = np.asarray(pts, float)
+    a, b = (P[:, 1], P[:, 0]) if axis == "y" else (P[:, 0], P[:, 1])
+    order = np.argsort(a)
+    a, b = a[order], b[order]
+    if level < a[0] or level > a[-1]:
+        return None
+    return float(np.interp(level, a, b))
