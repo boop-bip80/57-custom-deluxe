@@ -286,7 +286,7 @@ class Tracer:
         prof = np.where(den > 0.5 * len(tw), num / np.maximum(den, 1e-9), np.nan)
         return offs, prof, den / len(tw)
 
-    def measure(self, q, t, gate, min_peak=0.40, max_masked=0.30):
+    def measure(self, q, t, gate, min_peak=0.40, max_masked=0.30, max_width=3.8, max_tilt=0.75):
         """Return (offset, peak darkness) of the ridge nearest the prediction, or None."""
         n = np.array([-t[1], t[0]])
         offs, prof, den = self.profile(q, t, n)
@@ -313,9 +313,24 @@ class Tracer:
             return None
         if np.mean(den[lo:hi + 1] < 0.999) > max_masked:     # ridge partly hidden by grid / ignore mask
             return None
-        if (hi - lo) * 0.25 > 5.0:                           # too wide to be a single curve (text, merged lines)
+        if (hi - lo) * 0.25 > max_width:                     # too wide to be a single curve (text, merged crossing lines)
             return None
-        return float((w * offs[lo:hi + 1]).sum() / w.sum()), float(h)
+        cen = float((w * offs[lo:hi + 1]).sum() / w.sum())
+        # orientation test: the ridge ahead of and behind the sample must be parallel to the predicted path, otherwise
+        # this is a different curve crossing ours at an angle (a solid curve crossing a dashed one, for example)
+        pa = self._peak_near(q - 1.5 * t, t, n, cen)
+        pb = self._peak_near(q + 1.5 * t, t, n, cen)
+        if pa is not None and pb is not None and abs(pa - pb) > max_tilt:
+            return None
+        return cen, float(h)
+
+    def _peak_near(self, q, t, n, o0, tol=1.25):
+        offs, prof, _den = self.profile(q, t, n, half=3.0, tw=(-0.5, 0.0, 0.5))
+        pr = np.where(np.isnan(prof), 0.0, prof)
+        sel = np.abs(offs - o0) <= tol
+        if not sel.any() or pr[sel].max() < 0.35:
+            return None
+        return float(offs[sel][np.argmax(pr[sel])])
 
     def tangent_at(self, q, search=6.0, length=14.0):
         """Direction of the dominant dark stroke through q (grid pixels excluded)."""
@@ -385,6 +400,36 @@ class Tracer:
                 gap = 0
         while path and not path[-1][2]:                          # drop trailing extrapolation
             path.pop()
+        return self._cut_inconsistent(path)
+
+    @staticmethod
+    def _cut_inconsistent(path, long_gap=12, lead=12):
+        """After a long gap (label text, dash gap, crossing) the ridge may have been re-acquired on a different curve.
+        Keep the continuation only if it is on the extrapolated line (offset) and parallel to it (angle); otherwise
+        cut the path at the gap."""
+        P = np.array([(x, y) for x, y, _ in path])
+        ok = np.array([f for _, _, f in path])
+        idx = np.nonzero(ok)[0]
+        for k in range(1, len(idx)):
+            gap = idx[k] - idx[k - 1] - 1
+            if gap <= long_gap:
+                continue
+            before = idx[max(0, k - lead):k]
+            after = idx[k:k + lead]
+            if len(before) < 5:
+                continue
+            tb = P[before[-1]] - P[before[0]]
+            tb /= np.hypot(*tb)
+            jump = P[after[0]] - P[before[-1]]
+            perp = abs(tb[0] * jump[1] - tb[1] * jump[0])
+            if len(after) >= 5:
+                ta = P[after[-1]] - P[after[0]]
+                ta /= np.hypot(*ta)
+                ang = abs(math.degrees(math.atan2(tb[0] * ta[1] - tb[1] * ta[0], float(tb @ ta))))
+            else:
+                ang = 0.0
+            if perp > 1.5 + 0.03 * gap or ang > 10.0:
+                return path[:idx[k - 1] + 1]
         return path
 
     def trace(self, seed_px, **kw):
@@ -483,7 +528,7 @@ def _mark(covered, pts, max_link=35.0):
             covered[max(int(cy) - 2, 0):int(cy) + 3, max(int(cx) - 2, 0):int(cx) + 3] = True
 
 
-def discover(panel, tracer, scan_axis, levels_px, lo_px, hi_px, min_len_px, min_density=0.45, ignore_boxes=(), **trace_kw):
+def discover(panel, tracer, scan_axis, levels_px, lo_px, hi_px, min_len_px, min_density=0.45, region=None, **trace_kw):
     """Find curves without hand-placed seeds: scan the interior along many lines (rows if scan_axis == 'h', columns if 'v'),
     start the tracker at every dark run that is not already covered by a traced curve, keep traces that are long
     enough and mostly made of real ridge samples (min_density = measured samples per pixel of path; text strokes
@@ -502,7 +547,7 @@ def discover(panel, tracer, scan_axis, levels_px, lo_px, hi_px, min_len_px, min_
             sx, sy = int(round(seed[0])), int(round(seed[1]))
             if covered[sy, sx]:
                 continue
-            if any(xa <= seed[0] <= xb and ya <= seed[1] <= yb for (xa, ya, xb, yb) in ignore_boxes):
+            if region is not None and not (region[0] <= seed[0] <= region[2] and region[1] <= seed[1] <= region[3]):
                 continue
             pts = tracer.trace(seed, **trace_kw)
             if len(pts) < 8:
@@ -580,6 +625,21 @@ SHEET_CONFIG = {
              x=grid(0, 50, 11), y=grid(7, -1, 8), ignore=[("rect", 424, 198, 486, 242)],
              families=[dict(labels=lab("Ug", [0] + [-k for k in range(1, 13)]), order=("y", 0.2), min_len=45)]),
     ]),
+    "6V6": dict(csv="6V6_JJ_S22.csv", fig="Fig. 11", panels=[
+        dict(name="transfer", xname="Ug [V]", yname="Ia [mA]", frame=(99, 179, 374, 516),
+             x=grid(-30, 5, 7), y=grid(160, -20, 9), ignore=[("rect", 135, 211, 238, 253)],
+             families=[dict(labels=lab("Ua", [200, 150, 100, 50]), order=("y", 10.0), min_len=90)]),
+        dict(name="plate", xname="Ua [V]", yname="Ia or Ig [mA]", frame=(405, 179, 799, 515),
+             x=grid(0, 50, 11), y=grid(160, -20, 9),
+             ignore=[("rect", 583, 181, 655, 220), ("rect", 684, 208, 775, 254),
+                     ("rot", 509, 441, 46, 14, -40), ("rect", 489, 460, 500, 490),
+                     ("rect", 551, 462, 570, 480), ("rect", 545, 476, 570, 500)],
+             families=[dict(labels=["Ug=+20V", "Ug=+10V", "Ug=0V"] + lab("Ug", [-10, -20, -30, -40, -50]), order=("y", 10.0), min_len=100,
+                            select="rising", extra={"Ug=-10V": [(100.0, 5.5)], "Ug=-20V": [(189.0, 7.5)]}),
+                       dict(labels=["Pa=14W"], order=("x", 300.0), min_len=300, select="falling")],
+             seeded=[dict(label="Ig@Ug=+20V", seeds=[(160, 12.2), (250, 12.1), (330, 12.1), (94, 13.8)], bridge_px=8.0),
+                     dict(label="Ig@Ug=+5V", seeds=[(150, 7.85), (230, 7.85), (290, 7.85), (380, 7.85)], bridge_px=8.0)]),
+    ]),
     "12AX7": dict(csv="12AX7_JJ_S24.csv", fig="Fig. 10", panels=[
         dict(name="transfer", xname="Ug [V]", yname="Ia [mA]", frame=(117, 185, 393, 524),
              x=grid(-4, 0.2, 21), y=grid(6, -0.2, 31), ignore=[("rect", 135, 213, 233, 270)],
@@ -604,7 +664,7 @@ def trace_family(panel, tracer, fam):
         levels = np.arange(panel.left + 3, panel.right - 2, step)
         lo, hi = panel.top + 1, panel.bot - 1
     found = discover(panel, tracer, scan_axis, levels, lo, hi, fam["min_len"],
-                     min_density=fam.get("min_density", 0.45), **fam.get("trace", {}))
+                     min_density=fam.get("min_density", 0.45), region=fam.get("region"), **fam.get("trace", {}))
     sel = fam.get("select")
     if sel:
         found = [p for p in found if _rising(p) == (sel == "rising")]
@@ -645,20 +705,20 @@ def check_non_crossing(panel, curves):
             raise RuntimeError(f"{panel.name}: curves {la} and {lb} cross; label assignment is not trustworthy")
 
 
-def trace_seeded(panel, tracer, spec):
-    """Curves that cannot be discovered (dashed lines, curves broken by label text): the tracer is started from one or
-    more seeds (approximate data points on the curve, snapped to the nearest ridge) and the pieces are merged."""
-    pts = []
-    for (sx, sy) in spec["seeds"]:
-        pts += tracer.trace(panel.pix(sx, sy), **spec.get("trace", {}))
-    P = np.array(pts)
-    key = 0 if spec.get("sort", "x") == "x" else 1
+def merge_traces(pieces, key=0):
+    """Union of several traces of one curve, ordered along axis `key` (0: x, 1: y); samples of overlapping traces are
+    averaged in 0.5 px bins."""
+    P = np.vstack([np.asarray(p, float) for p in pieces])
     P = P[np.argsort(P[:, key])]
-    bins = np.round(P[:, key] * 2.0) / 2.0               # merge samples of overlapping traces (0.5 px bins)
-    out = []
-    for b in np.unique(bins):
-        out.append(P[bins == b].mean(axis=0))
-    return np.array(out)
+    bins = np.round(P[:, key] * 2.0) / 2.0
+    return np.array([P[bins == b].mean(axis=0) for b in np.unique(bins)])
+
+
+def trace_seeded(panel, tracer, spec):
+    """Curves that cannot be discovered (curves broken by label text or crossing a dashed line): the tracer is started
+    from one or more seeds (approximate data points on the curve, snapped to the nearest ridge) and the pieces merged."""
+    pieces = [tracer.trace(panel.pix(sx, sy), **spec.get("trace", {})) for (sx, sy) in spec["seeds"]]
+    return merge_traces(pieces, 0 if spec.get("sort", "x") == "x" else 1)
 
 
 def process_panel(img_dir, sheet_key, cfg, pcfg, out_dir, overlay_dir):
@@ -669,6 +729,9 @@ def process_panel(img_dir, sheet_key, cfg, pcfg, out_dir, overlay_dir):
     curves = []                                          # (label, raw pts, family dict)
     for fam in pcfg.get("families", ()):
         for label, pts in trace_family(panel, tracer, fam):
+            if label in fam.get("extra", {}):                # seeds for stretches the discovery cut at a crossing
+                more = [tracer.trace(panel.pix(sx, sy)) for (sx, sy) in fam["extra"][label]]
+                pts = merge_traces([pts] + more, fam.get("sort", 0))
             curves.append((label, pts, fam))
     for spec in pcfg.get("seeded", ()):
         tr = Tracer(panel, ignore=list(pcfg.get("ignore", ())) + list(spec.get("ignore", ())))
