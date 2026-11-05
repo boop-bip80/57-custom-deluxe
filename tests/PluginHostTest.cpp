@@ -7,6 +7,7 @@
 #include <complex>
 #include <iostream>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_utils/juce_audio_utils.h>
 
 using namespace juce;
 static int failures = 0;
@@ -103,10 +104,10 @@ int main(int argc, char** argv)
         // state with a chosen outMode index and IR path, applied through the host's setStateInformation
         auto applyState = [&](int mode, const String& irPath) {
             MemoryBlock b; inst->getStateInformation(b);
-            auto xml = getXmlFromBinary(b.getData(), (int)b.getSize());
+            auto xml = AudioProcessor::getXmlFromBinary(b.getData(), (int)b.getSize());
             for (auto* c : xml->getChildIterator()) if (c->getStringAttribute("id") == "outMode") c->setAttribute("value", mode);
             if (irPath.isNotEmpty()) xml->setAttribute("irPath", irPath); else xml->removeAttribute("irPath");
-            MemoryBlock nb; copyXmlToBinary(*xml, nb);
+            MemoryBlock nb; AudioProcessor::copyXmlToBinary(*xml, nb);
             inst->setStateInformation(nb.getData(), (int)nb.getSize());
         };
         auto currentMode = [&]() { return outMode ? (int)std::lround(outMode->getValue() * 3.0f) : -1; };
@@ -175,7 +176,7 @@ int main(int argc, char** argv)
             const auto y = render(burst);
             float worst = 0; for (size_t i = 0; i < y.size(); ++i) worst = std::max(worst, std::fabs(y[i] - term[i]));
             MemoryBlock b; inst->getStateInformation(b);
-            auto xml = getXmlFromBinary(b.getData(), (int)b.getSize());
+            auto xml = AudioProcessor::getXmlFromBinary(b.getData(), (int)b.getSize());
             CHECK(worst < 1e-6f && xml->getStringAttribute("irPath") == "/nonexistent/cd57/missing_ir.wav", "missing IR file: output falls back to the speaker terminals and the saved state still names the file");
         }
         // hybrid (mode 3) vs route 1 (mode 2) with a physical IR: -0.8, 1 ms delay, 2nd-order 60 Hz high-pass (finite energy at DC)
@@ -202,7 +203,7 @@ int main(int argc, char** argv)
             }
             // hybrid state round trip keeps mode and IR reference
             MemoryBlock b; inst->getStateInformation(b);
-            auto xml = getXmlFromBinary(b.getData(), (int)b.getSize());
+            auto xml = AudioProcessor::getXmlFromBinary(b.getData(), (int)b.getSize());
             int savedMode = -1; for (auto* c : xml->getChildIterator()) if (c->getStringAttribute("id") == "outMode") savedMode = c->getIntAttribute("value");
             CHECK(savedMode == 3 && xml->getStringAttribute("irPath") == f.getFullPathName() && xml->getIntAttribute("irFileSamples") == 8192 && xml->getStringAttribute("irHash").isNotEmpty(),
                   "saved state carries mode 3, the IR path, file length and hash");

@@ -112,6 +112,9 @@ inline std::vector<double> resampleKeepTransfer(const std::vector<double>& x, do
     const double g = std::min(1.0, fsOut / fsIn);         // anti-alias cutoff relative to the input Nyquist
     const double halfSpan = 32.0 / g;                     // kernel half-width in input samples
     const double beta = 10.0, i0b = besselI0(beta);
+    constexpr int kWinN = 8192;                           // Kaiser window table, linear interpolation (error < 1e-6)
+    std::vector<double> winTab((std::size_t)kWinN + 2, 0.0);
+    for (int i = 0; i <= kWinN; ++i) { const double r = (double)i / kWinN; winTab[(std::size_t)i] = besselI0(beta * std::sqrt(1.0 - r * r)) / i0b; }
     const std::size_t M = (std::size_t)std::ceil((double)x.size() / ratio);
     std::vector<double> y(M, 0.0);
     for (std::size_t m = 0; m < M; ++m) {
@@ -121,7 +124,9 @@ inline std::vector<double> resampleKeepTransfer(const std::vector<double>& x, do
         for (long k = k0; k <= k1; ++k) {
             const double d = u - (double)k, a = M_PI * g * d;
             const double sinc = std::fabs(a) < 1e-12 ? 1.0 : std::sin(a) / a;
-            const double r = d / halfSpan, win = std::fabs(r) >= 1.0 ? 0.0 : besselI0(beta * std::sqrt(1.0 - r * r)) / i0b;
+            const double r = std::fabs(d) / halfSpan;
+            double win = 0.0;
+            if (r < 1.0) { const double t = r * kWinN; const std::size_t i = (std::size_t)t; win = winTab[i] + (t - (double)i) * (winTab[i + 1] - winTab[i]); }
             acc += x[(std::size_t)k] * g * sinc * win;
         }
         y[m] = ratio * acc;
