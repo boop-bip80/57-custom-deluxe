@@ -237,6 +237,25 @@ class Panel:
 
 
 # ------------------------------------------------------------------------------------------ ridge tracker
+def rasterize_regions(shape, regions):
+    """Boolean image of pixel regions to ignore (label text, legend, leader lines).  A region is
+    ('rect', x0, y0, x1, y1) or ('rot', cx, cy, length, width, angle_deg): a rectangle rotated by angle (image coords)."""
+    img = Image.new("L", (shape[1], shape[0]), 0)
+    dr = ImageDraw.Draw(img)
+    for r in regions:
+        if r[0] == "rect":
+            dr.rectangle([r[1], r[2], r[3], r[4]], fill=1)
+        else:
+            _, cx, cy, ln, wd, ang = r
+            a = math.radians(ang)
+            ux, uy = math.cos(a), math.sin(a)
+            vx, vy = -uy, ux
+            pts = [(cx + sx * ln / 2 * ux + sy * wd / 2 * vx, cy + sx * ln / 2 * uy + sy * wd / 2 * vy)
+                   for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+            dr.polygon(pts, fill=1)
+    return np.asarray(img, bool)
+
+
 def _bilinear(img, xs, ys):
     return ndimage.map_coordinates(img, [ys, xs], order=1, mode="nearest")
 
@@ -248,9 +267,7 @@ class Tracer:
 
     def __init__(self, panel, ignore=()):
         self.p = panel
-        valid = panel.valid.copy()
-        for (xa, ya, xb, yb) in ignore:                      # pixel rectangles (label text on top of a curve)
-            valid[int(ya):int(yb) + 1, int(xa):int(xb) + 1] = False
+        valid = panel.valid & ~rasterize_regions(panel.d.shape, ignore)
         self.num = panel.clean * valid
         self.den = valid.astype(float)
         x0, y0, x1, y1 = panel.frame
@@ -326,7 +343,7 @@ class Tracer:
         yy, xx = np.unravel_index(np.argmax(sub), sub.shape)
         return np.array([x - r + xx, y - r + yy], float)
 
-    def follow(self, start, t0, step=1.0, max_gap=30.0, fit_n=14):
+    def follow(self, start, t0, step=1.0, max_gap=30.0, fit_n=14, gate0=1.0, gate_max=2.6):
         """March from `start` along t0.  Returns list of (x, y, measured_flag)."""
         path = [(start[0], start[1], True)]
         meas = [(0.0, start[0], start[1])]                       # (path length, x, y) of measured samples
@@ -352,7 +369,7 @@ class Tracer:
                 q = np.array([path[-1][0], path[-1][1]]) + t * step
             if not (x0 <= q[0] <= x1 and y0 <= q[1] <= y1):
                 break
-            gate = min(1.0 + 0.06 * gap, 2.6)
+            gate = min(gate0 + 0.06 * gap, gate_max)
             m = self.measure(q, t, gate)
             s_total += step
             if m is None:
@@ -380,7 +397,7 @@ class Tracer:
 
 
 # ------------------------------------------------------------------------------------------ smoothing / output
-def smooth_curve(pts, sigma_px=0.35, step_px=1.5, max_bridge_px=3.0):
+def smooth_curve(pts, sigma_px=0.2, step_px=1.0, max_bridge_px=5.0):
     """pts: traced sample positions (pixels) in path order.  A smoothing spline x(s), y(s) (s = path length) is fitted
     with iterative 3-sigma outlier rejection; the curve is re-sampled every step_px, only where raw samples exist
     within max_bridge_px (dash gaps and label gaps are NOT filled).  Returns (resampled Nx2, stats)."""
@@ -521,12 +538,193 @@ def dedupe(traces, radius=2.0, frac=0.5):
     return kept
 
 
-def eval_at(pts, axis, level):
-    """position along the other axis where the polyline crosses axis-level (axis 'y': crossing row; 'x': crossing column)"""
+def eval_at(pts, axis, level, extrapolate_px=0.0):
+    """position along the other axis where the polyline crosses axis-level (axis 'y': crossing row; 'x': crossing column).
+    Up to extrapolate_px beyond the traced extent the end of the curve is extended linearly (last 6 samples)."""
     P = np.asarray(pts, float)
     a, b = (P[:, 1], P[:, 0]) if axis == "y" else (P[:, 0], P[:, 1])
     order = np.argsort(a)
     a, b = a[order], b[order]
-    if level < a[0] or level > a[-1]:
+    if a[0] <= level <= a[-1]:
+        return float(np.interp(level, a, b))
+    if level < a[0] - extrapolate_px or level > a[-1] + extrapolate_px:
         return None
-    return float(np.interp(level, a, b))
+    sl = slice(0, 6) if level < a[0] else slice(-6, None)
+    k = np.polyfit(a[sl], b[sl], 1)
+    return float(np.polyval(k, level))
+
+
+# ------------------------------------------------------------------------------------------ sheet / panel configuration
+def grid(v0, step, n):
+    return dict(via="grid", v0=v0, step=step, n=n, n_grid=n)
+
+
+def ticks(values):
+    return dict(via="ticks", ticks_values=values, n_grid=None)
+
+
+def lab(prefix, values, fmt="{:g}", suffix="V"):
+    return [f"{prefix}={fmt.format(v)}{suffix}" for v in values]
+
+
+# Every family is  dict(labels=[...], order=(axis, level), ...): curves are discovered by pixel analysis and the
+# labels are assigned in the order in which the curves cross the stated line of the panel (axis 'y': the row at data
+# value `level`; ascending x).  The number of discovered curves must equal the number of labels, and adjacent curves
+# must not cross inside their common range, otherwise the run aborts.
+SHEET_CONFIG = {
+    "12AY7": dict(csv="12AY7_JJ_S21.csv", fig="Fig. 9", panels=[
+        dict(name="transfer", xname="Ug [V]", yname="Ia [mA]", frame=(130, 178, 390, 497),
+             x=grid(-8, 1, 9), y=grid(7, -1, 8), ignore=[("rect", 146, 206, 214, 248)],
+             families=[dict(labels=lab("Ua", [300, 250, 200, 150, 100, 50]), order=("y", 1.0), min_len=90)]),
+        dict(name="plate", xname="Ua [V]", yname="Ia [mA]", frame=(408, 181, 784, 497),
+             x=grid(0, 50, 11), y=grid(7, -1, 8), ignore=[("rect", 424, 198, 486, 242)],
+             families=[dict(labels=lab("Ug", [0] + [-k for k in range(1, 13)]), order=("y", 0.2), min_len=45)]),
+    ]),
+    "12AX7": dict(csv="12AX7_JJ_S24.csv", fig="Fig. 10", panels=[
+        dict(name="transfer", xname="Ug [V]", yname="Ia [mA]", frame=(117, 185, 393, 524),
+             x=grid(-4, 0.2, 21), y=grid(6, -0.2, 31), ignore=[("rect", 135, 213, 233, 270)],
+             families=[dict(labels=lab("Ua", [250, 200, 150, 100]), order=("y", 1.0), min_len=150)]),
+        dict(name="plate", xname="Ua [V]", yname="Ia [mA]", frame=(412, 185, 812, 525),
+             x=ticks([0, 50, 100, 150, 200, 250, 300, 350]), y=grid(6, -0.2, 31),
+             ignore=[("rect", 709, 200, 803, 272)],
+             families=[dict(labels=lab("Ug", [0, -0.5, -1, -1.5, -2, -2.5, -3, -3.5, -4]), order=("y", 0.37), min_len=60)]),
+    ]),
+}
+
+
+# ------------------------------------------------------------------------------------------ family processing
+def trace_family(panel, tracer, fam):
+    """Discover the curves of one family, order them, verify, and return list of (label, pts)."""
+    scan_axis = fam.get("scan", "h")
+    step = fam.get("step", 6)
+    if scan_axis == "h":
+        levels = np.arange(panel.top + 3, panel.bot - 2, step)
+        lo, hi = panel.left + 1, panel.right - 1
+    else:
+        levels = np.arange(panel.left + 3, panel.right - 2, step)
+        lo, hi = panel.top + 1, panel.bot - 1
+    found = discover(panel, tracer, scan_axis, levels, lo, hi, fam["min_len"],
+                     min_density=fam.get("min_density", 0.45), **fam.get("trace", {}))
+    sel = fam.get("select")
+    if sel:
+        found = [p for p in found if _rising(p) == (sel == "rising")]
+    ax, lv = fam["order"]
+    lvp = float(panel.ycal.to_pix(lv)) if ax == "y" else float(panel.xcal.to_pix(lv))
+    keyed = []
+    for pts in found:
+        e = eval_at(pts, ax, lvp, extrapolate_px=fam.get('extrapolate_px', 15.0))
+        if e is None:
+            raise RuntimeError(f"{panel.name}: a discovered curve does not cross the ordering line {ax}={lv}")
+        keyed.append((e, pts))
+    keyed.sort(key=lambda t: t[0])
+    labels = fam["labels"]
+    if len(keyed) != len(labels):
+        raise RuntimeError(f"{panel.name}: found {len(keyed)} curves, expected {len(labels)} ({labels})")
+    curves = [(labels[k], pts) for k, (_e, pts) in enumerate(keyed)]
+    check_non_crossing(panel, curves)
+    return curves
+
+
+def _rising(pts):
+    P = np.asarray(pts, float)
+    return (P[-1, 1] - P[0, 1]) * (P[-1, 0] - P[0, 0]) < 0 if P[-1, 0] != P[0, 0] else True
+
+
+def check_non_crossing(panel, curves):
+    """adjacent curves of a family must keep their order along their common extent (guards against mis-assigned labels)"""
+    for (la, pa), (lb, pb) in zip(curves[:-1], curves[1:]):
+        A, B = np.asarray(pa, float), np.asarray(pb, float)
+        lo = max(A[:, 1].min(), B[:, 1].min())
+        hi = min(A[:, 1].max(), B[:, 1].max())
+        if hi - lo < 10:
+            continue
+        ys = np.linspace(lo + 2, hi - 2, 25)
+        xa = np.array([eval_at(A, "y", y) for y in ys])
+        xb = np.array([eval_at(B, "y", y) for y in ys])
+        if not (np.all(xa < xb) or np.all(xa > xb)):
+            raise RuntimeError(f"{panel.name}: curves {la} and {lb} cross; label assignment is not trustworthy")
+
+
+def trace_seeded(panel, tracer, spec):
+    """Curves that cannot be discovered (dashed lines, curves broken by label text): the tracer is started from one or
+    more seeds (approximate data points on the curve, snapped to the nearest ridge) and the pieces are merged."""
+    pts = []
+    for (sx, sy) in spec["seeds"]:
+        pts += tracer.trace(panel.pix(sx, sy), **spec.get("trace", {}))
+    P = np.array(pts)
+    key = 0 if spec.get("sort", "x") == "x" else 1
+    P = P[np.argsort(P[:, key])]
+    bins = np.round(P[:, key] * 2.0) / 2.0               # merge samples of overlapping traces (0.5 px bins)
+    out = []
+    for b in np.unique(bins):
+        out.append(P[bins == b].mean(axis=0))
+    return np.array(out)
+
+
+def process_panel(img_dir, sheet_key, cfg, pcfg, out_dir, overlay_dir):
+    path = os.path.join(img_dir, SHEETS[sheet_key][0])
+    d = load_dark(path)
+    panel = Panel(d, path, f"{sheet_key}.{pcfg['name']}", pcfg["frame"], pcfg["x"], pcfg["y"])
+    tracer = Tracer(panel, ignore=pcfg.get("ignore", ()))
+    curves = []                                          # (label, raw pts, family dict)
+    for fam in pcfg.get("families", ()):
+        for label, pts in trace_family(panel, tracer, fam):
+            curves.append((label, pts, fam))
+    for spec in pcfg.get("seeded", ()):
+        tr = Tracer(panel, ignore=list(pcfg.get("ignore", ())) + list(spec.get("ignore", ())))
+        curves.append((spec["label"], trace_seeded(panel, tr, spec), spec))
+    rows, drawn, stats = [], [], []
+    for label, pts, fam in curves:
+        sm, st = smooth_curve(pts, sigma_px=fam.get("sigma_px", 0.2), max_bridge_px=fam.get("bridge_px", 5.0))
+        if len(sm) < 40:
+            raise RuntimeError(f"{panel.name} {label}: only {len(sm)} output points (< 40)")
+        xs, ys = panel.val(sm[:, 0], sm[:, 1])
+        rows += [(pcfg["name"], label, float(x), float(y)) for x, y in zip(xs, ys)]
+        drawn.append((label, sm))
+        st.update(parameter=label, x_range=[float(xs.min()), float(xs.max())], y_range=[float(ys.min()), float(ys.max())])
+        stats.append(st)
+    os.makedirs(overlay_dir, exist_ok=True)
+    draw_overlay(panel, drawn, os.path.join(overlay_dir, f"{SHEETS[sheet_key][0][:-4]}_{pcfg['name']}.png"))
+    cal = dict(x=panel.xcal.report(), y=panel.ycal.report())
+    return rows, dict(calibration=cal, curves=stats), panel
+
+
+def write_csv(path, cfg, sheet_key, panels_cfg, rows):
+    with open(path, "w", newline="") as f:
+        f.write(f"# DIGITIZED from dossier {cfg['fig']} (JJ {sheet_key} sheet, source {SHEETS[sheet_key][1]}) by scripts/digitize_jj_sheets.py\n")
+        for pc in panels_cfg:
+            f.write(f"# panel {pc['name']}: x = {pc['xname']}, y = {pc['yname']}\n")
+        w = csv.writer(f)
+        w.writerow(["panel", "parameter", "x", "y"])
+        for r in rows:
+            w.writerow([r[0], r[1], f"{r[2]:.5g}", f"{r[3]:.5g}"])
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
+    ap.add_argument("--img-dir", default=IMG_DIR_DEFAULT)
+    ap.add_argument("--out-dir", default=OUT_DIR_DEFAULT)
+    ap.add_argument("--only", default=None, help="digitise one sheet only (12AY7, 12AX7, 6V6, 5Y3)")
+    a = ap.parse_args(argv)
+    report = {}
+    for sheet_key, cfg in SHEET_CONFIG.items():
+        if a.only and a.only != sheet_key:
+            continue
+        os.makedirs(a.out_dir, exist_ok=True)
+        rows, rep = [], {}
+        for pcfg in cfg["panels"]:
+            r, pr, _panel = process_panel(a.img_dir, sheet_key, cfg, pcfg, a.out_dir, os.path.join(a.out_dir, "overlays"))
+            rows += r
+            rep[pcfg["name"]] = pr
+            c = pr["calibration"]
+            print(f"{sheet_key}.{pcfg['name']:<10} x: {c['x']['n_lines']:2d} lines max res {c['x']['max_residual_px']:.2f} px "
+                  f"({c['x']['max_residual_data_units']:.3g} units)   y: {c['y']['n_lines']:2d} lines max res "
+                  f"{c['y']['max_residual_px']:.2f} px ({c['y']['max_residual_data_units']:.3g} units)   curves {len(pr['curves'])}")
+        write_csv(os.path.join(a.out_dir, cfg["csv"]), cfg, sheet_key, cfg["panels"], rows)
+        report[sheet_key] = rep
+    with open(os.path.join(a.out_dir, "digitization_report.json"), "w") as f:
+        json.dump(report, f, indent=1)
+
+
+if __name__ == "__main__":
+    main()
