@@ -319,6 +319,310 @@ static void testIrPreparation()
     }
 }
 
+// ---------------------------------------------------------------------------------------------------- D. factorisation identity
+static std::vector<cplx> spectrum(const std::vector<double>& x, size_t N)
+{
+    std::vector<cplx> a(N, cplx(0, 0));
+    for (size_t i = 0; i < x.size() && i < N; ++i) a[i] = x[i];
+    fftInPlace(a);
+    return a;
+}
+static std::vector<double> convolveFFT(const std::vector<double>& x, const std::vector<double>& h)
+{
+    const size_t n = x.size() + h.size() - 1, N = nextPow2(n);
+    auto X = spectrum(x, N), Hh = spectrum(h, N);
+    for (size_t k = 0; k < N; ++k) X[k] *= Hh[k];
+    fftInPlace(X, true);
+    std::vector<double> y(n);
+    for (size_t i = 0; i < n; ++i) y[i] = X[i].real();
+    return y;
+}
+// energy ratio of the error spectrum to the reference spectrum in [lo, hi] Hz (ESR, dossier Sec. 26), in dB
+static double bandESR(const std::vector<double>& ref, const std::vector<double>& test, double fs, double lo, double hi)
+{
+    const size_t N = nextPow2(std::max(ref.size(), test.size()));
+    const auto A = spectrum(ref, N), B = spectrum(test, N);
+    double e = 0, r = 0;
+    for (size_t k = 1; k < N / 2; ++k) {
+        const double f0 = (double)k * fs / (double)N;
+        if (f0 < lo || f0 > hi) continue;
+        e += std::norm(B[k] - A[k]); r += std::norm(A[k]);
+    }
+    return 10.0 * std::log10(std::max(e / std::max(r, 1e-300), 1e-30));
+}
+
+// synthetic "true" residual R_true(f): gain, arrival delay, a finite-depth notch, a resonance and a mild roll-off.
+// NOT a measurement: it only has to be known exactly.
+struct RTrue {
+    double gain = 0.7, delaySec = 0.5e-3, notchHz = 2500.0, notchDepthDb = -30.0, resHz = 3200.0, resDb = 9.0, resQ = 3.0, lpHz = 7000.0;
+    cplx operator()(double f) const
+    {
+        const cplx s(0.0, 2.0 * M_PI * f);
+        const double wn = 2 * M_PI * notchHz, zp = 0.15, zz = zp * std::pow(10.0, notchDepthDb / 20.0);
+        const cplx notch = (s * s + 2.0 * zz * wn * s + wn * wn) / (s * s + 2.0 * zp * wn * s + wn * wn);
+        const double wr = 2 * M_PI * resHz, zr = 0.5 / resQ, A = std::pow(10.0, resDb / 20.0);
+        const cplx res = 1.0 + (A - 1.0) * (2.0 * zr * wr * s) / (s * s + 2.0 * zr * wr * s + wr * wr);
+        const cplx lp = 1.0 / (1.0 + s / (2 * M_PI * lpHz));
+        return gain * std::polar(1.0, -2.0 * M_PI * f * delaySec) * notch * res * lp;
+    }
+};
+
+// IR whose spectrum is Spec(f) on an N-point grid (conjugate-symmetric), truncated to L samples
+template <class SpecFn>
+static std::vector<double> irFromSpectrum(SpecFn&& Spec, double fs, size_t N, size_t L)
+{
+    std::vector<cplx> a(N, cplx(0, 0));
+    for (size_t k = 0; k <= N / 2; ++k) {
+        cplx v = Spec((double)k * fs / (double)N);
+        if (k == 0 || k == N / 2) v = cplx(v.real(), 0.0);
+        a[k] = v; if (k > 0 && k < N / 2) a[N - k] = std::conj(v);
+    }
+    fftInPlace(a, true);
+    std::vector<double> h(L);
+    for (size_t i = 0; i < L; ++i) h[i] = a[i].real();
+    return h;
+}
+
+// zero-phase band-pass by FFT masking (analysis helper for the time-domain comparisons)
+static std::vector<double> bandLimit(const std::vector<double>& x, size_t N, double fs, double lo, double hi)
+{
+    auto X = spectrum(x, N);
+    for (size_t k = 0; k <= N / 2; ++k) {
+        const double f0 = (double)k * fs / (double)N;
+        const bool in = f0 >= lo && f0 <= hi;
+        if (!in) { X[k] = 0; if (k > 0 && k < N / 2) X[N - k] = 0; }
+    }
+    fftInPlace(X, true);
+    std::vector<double> y(N); for (size_t i = 0; i < N; ++i) y[i] = X[i].real();
+    return y;
+}
+
+static void testFactorisation()
+{
+    section("D. Linear acoustic identity (Sec. 27 experiment 4) with a SYNTHETIC H = G R_true: route 1 vs route 2");
+    info("NO MEASURED H EXISTS: this validates the algebra and its implementation, not the acoustics of the real cabinet");
+    const double fs = 48000.0;
+    const SpeakerTS sp;
+    auto G = [&](double f0) { return speakerVolumeVelocityPerVolt(sp, f0); };
+    const RTrue rt;
+    const size_t L = 8192, NG = 1 << 16;
+    const auto h = irFromSpectrum([&](double f0) { return G(f0) * rt(f0); }, fs, NG, L);
+    FactorSettings fset; fset.sampleRate = fs;
+    const auto fr = factorResidual(h, G, fset);
+    info("factorisation: gRef " + f(fr.gRef * 1e3, 3) + " (L/s)/V, lambda floor " + f(fset.floorDb, 0) + " dB re max|G| in [" + f(fset.bandLoHz, 0) + ", " + f(fset.bandHiHz, 0) + "] Hz, +" + f(fset.outOfBandDbPerOct, 0) + " dB/oct above; FFT " + std::to_string(fr.fftSize));
+    info("guaranteed gain bound |R| gRef/|H| <= +" + f(fr.gainBoundDb, 1) + " dB; regularisation-limited band (0.5 dB): " + f(fr.regLimitLoHz, 0) + " - " + f(fr.regLimitHiHz, 0) + " Hz; REALISED usable band of the delivered FIR: " + f(fr.usableLoHz, 0) + " - " + f(fr.usableHiHz, 0) + " Hz");
+    info("residual FIR: " + std::to_string(fr.residual.size()) + " taps; non-causal energy dropped " + f(fr.nonCausalDb, 1) + " dB, tail beyond FIR dropped " + f(fr.truncationDb, 1) + " dB (re total)");
+
+    // D1: frequency-domain reconstruction G_n * FFT(r)  vs  H
+    const auto Hf = spectrum(h, NG);
+    const auto Rf = spectrum(fr.residual, NG);
+    const std::pair<double, double> bands[] = {{80, 300}, {300, 1000}, {1000, 2000}, {2000, 4000}, {4000, 6000}, {6000, 8000}, {8000, 12000}};
+    double worstMag = 0;
+    std::ostringstream tab;
+    for (auto b : bands) {
+        double e = 0, rr = 0, maxMag = 0;
+        for (size_t k = 1; k < NG / 2; ++k) {
+            const double f0 = (double)k * fs / (double)NG;
+            if (f0 < b.first || f0 >= b.second) continue;
+            const cplx Hhat = (G(f0) / fr.gRef) * Rf[k];
+            e += std::norm(Hhat - Hf[k]); rr += std::norm(Hf[k]);
+            if (std::fabs(f0 - rt.notchHz) > 0.15 * rt.notchHz) maxMag = std::max(maxMag, std::fabs(dB(std::abs(Hhat) / std::abs(Hf[k]))));
+        }
+        tab << f(b.first, 0) << "-" << f(b.second, 0) << "Hz: ESR " << f(10 * std::log10(e / rr), 1) << " dB, max |H| err " << f(maxMag, 3) << " dB\n          ";
+        if (b.second <= fr.usableHiHz) worstMag = std::max(worstMag, maxMag);
+    }
+    info("frequency-domain identity G*R vs H by band (notch +-15 % excluded from the magnitude column):\n          " + tab.str());
+    check(fr.usableLoHz <= 80.0 && fr.usableHiHz >= 1000.0, "the realised usable band covers at least 80 Hz - 1 kHz for this synthetic H (dossier Sec. 26 band is 80 Hz - 8 kHz; the reached top edge is reported above)", f(fr.usableLoHz, 0) + " - " + f(fr.usableHiHz, 0) + " Hz");
+    check(worstMag <= 0.5, "independent check: inside the realised usable band G R reproduces |H| within the 0.5 dB tolerance the band was declared with", "worst |H| error " + f(worstMag, 3) + " dB");
+
+    // D2: time-domain identity with a noise drive: route 1 y1 = h (*) x ; route 2 y2 = r (*) (U_cone/gRef), U_cone = g (*) x
+    {
+        const auto g = irFromSpectrum(G, fs, NG, NG / 2);
+        std::mt19937 rng(20240229); std::normal_distribution<double> nd(0.0, 1.0);
+        std::vector<double> x((size_t)(1.5 * fs));
+        for (auto& v : x) v = nd(rng);
+        const auto u = convolveFFT(x, g);
+        std::vector<double> c(u.size()); for (size_t i = 0; i < u.size(); ++i) c[i] = u[i] / fr.gRef;
+        const auto y1 = convolveFFT(x, h), y2 = convolveFFT(c, fr.residual);
+        std::ostringstream t2; double worst = -300;
+        for (auto b : {std::pair<double, double>{80, 300}, {300, 1000}, {1000, 2000}, {2000, 4000}, {4000, 6000}}) {
+            const double e = bandESR(y1, y2, fs, b.first, b.second);
+            t2 << f(b.first, 0) << "-" << f(b.second, 0) << ": " << f(e, 1) << " dB  ";
+            if (b.second <= fr.usableHiHz) worst = std::max(worst, e);
+        }
+        info("route 2 (cone volume velocity -> residual FIR) vs route 1 (terminal voltage -> H), noise drive, ESR by band: " + t2.str());
+        check(worst < -26.02, "route 1 and route 2 agree over the realised usable band: band ESR below the dossier's NRMSE 5 % (-26.02 dB)", "worst band ESR " + f(worst, 1) + " dB");
+
+        // D4: the double-count trap: pushing U_cone (as volts-equivalent) through the FULL H instead of the residual
+        const auto yw = convolveFFT(c, h);
+        std::ostringstream t4; double bestWrong = 300;
+        for (auto b : {std::pair<double, double>{80, 300}, {300, 1000}, {1000, 2000}, {2000, 4000}}) {
+            const double e = bandESR(y1, yw, fs, b.first, b.second);
+            t4 << f(b.first, 0) << "-" << f(b.second, 0) << ": " << f(e, 1) << " dB  ";
+            if (b.first >= 300) bestWrong = std::min(bestWrong, e);
+        }
+        info("DOUBLE-COUNT TRAP: cone motion through the full H gives G_n*H; ESR vs the correct route 1 by band: " + t4.str());
+        std::ostringstream t5;
+        for (double f0 : {100.0, 300.0, 1000.0, 3000.0}) t5 << f(f0, 0) << " Hz: " << f(dB(std::abs(G(f0)) / fr.gRef), 1) << " dB  ";
+        info("the wrong transfer is |G_n| x |H|, i.e. wrong by 20 log10|G_n| = " + t5.str() + " (only at the cone's own resonance peak, ~100 Hz, does |G_n| = 1)");
+        check(bestWrong > -3.0, "applying the FULL H to cone motion is grossly wrong wherever the cone response is not at its peak (300 Hz - 4 kHz: ESR worse than -3 dB), while the residual route is below -26 dB", "best wrong-route ESR in 300 Hz-4 kHz " + f(bestWrong, 1) + " dB");
+
+        // D6: arrival time and polarity in the time domain: zero-phase band-limit both outputs to 200-1500 Hz, cross-correlate
+        const size_t Nc = nextPow2(std::max(y1.size(), y2.size()));
+        const auto b1 = bandLimit(y1, Nc, fs, 200.0, 1500.0), b2 = bandLimit(y2, Nc, fs, 200.0, 1500.0);
+        auto A1 = spectrum(b1, Nc); const auto A2 = spectrum(b2, Nc);
+        for (size_t k = 0; k < Nc; ++k) A1[k] = std::conj(A1[k]) * A2[k];
+        fftInPlace(A1, true);                                      // r12[m] = sum b1[n] b2[n+m]
+        size_t mp = 0; for (size_t m = 0; m < Nc; ++m) if (A1[m].real() > A1[mp].real()) mp = m;
+        const double ym1 = A1[(mp + Nc - 1) % Nc].real(), y0 = A1[mp].real(), yp1 = A1[(mp + 1) % Nc].real();
+        const double lag = ((mp > Nc / 2) ? (double)mp - (double)Nc : (double)mp) + 0.5 * (ym1 - yp1) / (ym1 - 2 * y0 + yp1);
+        double e11 = 0, e12 = 0; for (size_t i = 0; i < Nc; ++i) { e11 += b1[i] * b1[i]; e12 += b1[i] * b2[i]; }
+        check(std::fabs(lag) < 0.1 && e12 > 0 && std::fabs(dB(e12 / e11)) < 0.5, "arrival time, polarity, gain (200 Hz-1.5 kHz, noise drive): cross-correlation lag of route 2 vs route 1 within 0.1 sample, same sign, level within 0.5 dB",
+              "lag " + f(lag, 4) + " samples, regression gain " + f(dB(e12 / e11), 3) + " dB");
+    }
+
+    // D3: regularisation at deep nulls: the bound holds, naive division does not
+    {
+        std::ostringstream t3;
+        double prevNaive = 0; bool monotone = true, boundHolds = true, naiveBreaks = false;
+        for (double nullDb : {-60.0, -90.0, -120.0}) {
+            auto Gn = [&](double f0) {
+                const cplx s(0.0, 2.0 * M_PI * f0);
+                const double wn = 2 * M_PI * 1500.0, zp = 0.02, zz = zp * std::pow(10.0, nullDb / 20.0);       // ~60 Hz wide null at 1.5 kHz
+                return G(f0) * (s * s + 2.0 * zz * wn * s + wn * wn) / (s * s + 2.0 * zp * wn * s + wn * wn);
+            };
+            auto h0 = irFromSpectrum([&](double f0) { return Gn(f0) * rt(f0); }, fs, NG, L);
+            const auto H0 = spectrum(h0, NG);
+            double hpk = 0; for (size_t k = 1; k < NG / 2; ++k) hpk = std::max(hpk, std::abs(H0[k]));
+            // white measurement floor: -60 dB per spectral bin relative to the largest bin of |H|
+            std::mt19937 rng(7); std::normal_distribution<double> nd(0.0, 1.0);
+            const double sigma = hpk * std::pow(10.0, -60.0 / 20.0) / std::sqrt((double)L);
+            auto hm = h0; for (auto& v : hm) v += sigma * nd(rng);
+            const auto frN = factorResidual(hm, Gn, fset);
+            const auto Hm = spectrum(hm, NG), Rr = spectrum(frN.residual, NG);
+            hpk = 0; for (size_t k = 1; k < NG / 2; ++k) hpk = std::max(hpk, std::abs(Hm[k]));
+            double naiveMax = 0, regMax = 0;
+            for (size_t k = 1; k < NG / 2; ++k) {
+                const double f0 = (double)k * fs / (double)NG;
+                naiveMax = std::max(naiveMax, std::abs(Hm[k]) / std::abs(Gn(f0)) * frN.gRef);       // |R_naive| gRef  (H/G, in the residual's units)
+                regMax = std::max(regMax, std::abs(Rr[k]));
+            }
+            const double bound = hpk / (2.0 * std::pow(10.0, fset.floorDb / 20.0));
+            t3 << "null " << f(nullDb, 0) << " dB: naive " << f(dB(naiveMax / hpk), 1) << " dB, regularised " << f(dB(regMax / hpk), 1) << " dB re max|H| (bound +" << f(frN.gainBoundDb, 1) << ");  ";
+            boundHolds = boundHolds && regMax <= bound;
+            monotone = monotone && naiveMax > prevNaive; prevNaive = naiveMax;
+            if (nullDb <= -120.0) naiveBreaks = naiveMax > bound;
+        }
+        info("deep-null test (G with a notch of the stated depth at 1.5 kHz; H carries a -60 dB white measurement floor), peak |R| gRef re max|H|: " + t3.str());
+        check(boundHolds && monotone && naiveBreaks, "regularisation bound |R| gRef <= max|H|/(2 * 10^(floor/20)) holds for nulls of -60/-90/-120 dB; naive H/G grows with null depth and exceeds the bound at -120 dB", "see INFO line");
+    }
+
+    // D5: polarity and absolute gain with a physical IR (finite energy at DC): H = -2.5 (inverted, +8 dB), 1 ms delay, 2nd-order 60 Hz high-pass
+    {
+        const double gainWanted = -2.5; const size_t dly = 48;
+        std::vector<double> hp(8192, 0.0); hp[dly] = gainWanted;
+        {   // 2nd-order Butterworth high-pass at 60 Hz (bilinear)
+            const double w = std::tan(M_PI * 60.0 / fs), k = std::sqrt(2.0), n = 1.0 / (1.0 + k * w + w * w);
+            const double b0 = n, b1 = -2 * n, b2 = n, a1 = 2 * (w * w - 1) * n, a2 = (1 - k * w + w * w) * n;
+            double z1 = 0, z2 = 0;
+            for (auto& v : hp) { const double x0 = v, y = b0 * x0 + z1; z1 = b1 * x0 - a1 * y + z2; z2 = b2 * x0 - a2 * y; v = y; }
+        }
+        const auto frp = factorResidual(hp, G, fset);
+        const auto Hp = spectrum(hp, NG), Rp = spectrum(frp.residual, NG);
+        double worstDb = 0, worstPh = 0, minReal = 1e9;
+        for (double f0 : {100.0, 150.0, 300.0, 700.0, 1000.0, 1800.0, 3000.0}) {
+            const size_t k = (size_t)std::round(f0 * (double)NG / fs);
+            const double fk = (double)k * fs / (double)NG;
+            const cplx hat = (G(fk) / frp.gRef) * Rp[k], ref = Hp[k];
+            worstDb = std::max(worstDb, std::fabs(dB(std::abs(hat) / std::abs(ref))));
+            worstPh = std::max(worstPh, std::fabs(std::arg(hat / ref)) * 180 / M_PI);
+            minReal = std::min(minReal, std::real(hat / ref));
+        }
+        auto gd = [&](const std::vector<cplx>& S, bool withG) {
+            const size_t k1 = (size_t)std::round(950.0 * (double)NG / fs), k2 = (size_t)std::round(1050.0 * (double)NG / fs);
+            auto at = [&](size_t k) { const double fk = (double)k * fs / (double)NG; return withG ? (G(fk) / frp.gRef) * S[k] : S[k]; };
+            return -std::arg(at(k2) / at(k1)) / (2 * M_PI * ((double)(k2 - k1) * fs / (double)NG));
+        };
+        const double gdRef = gd(Hp, false), gdHat = gd(Rp, true);
+        const size_t kk = (size_t)std::round(1000.0 * (double)NG / fs);
+        check(worstDb < 0.5 && worstPh < 3.0 && minReal > 0.9 && std::real(Hp[kk]) < 0,
+              "polarity and absolute gain: G*R reproduces H = -2.5 z^-48 (inverted, 2nd-order 60 Hz HP) with the same sign within 0.5 dB / 3 deg over 100 Hz - 3 kHz",
+              "worst " + f(worstDb, 3) + " dB, " + f(worstPh, 2) + " deg, min Re(G*R/H) " + f(minReal, 3) + ", H(1 kHz) = " + f(std::real(Hp[kk]), 3));
+        check(std::fabs(gdRef - (double)dly / fs) < 20e-6 && std::fabs(gdHat - gdRef) < 20e-6, "arrival time: group delay of G*R at 1 kHz equals that of H (1 ms delay + the 60 Hz high-pass, 13.6 us at 1 kHz) within 20 us", "H " + f(gdRef * 1e3, 4) + " ms, G*R " + f(gdHat * 1e3, 4) + " ms");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------- E. through the real engine
+struct EngineRun { std::vector<double> xt, vc; double vtRms = 0; };
+// drive the complete engine with jack volts, return the terminal output in OUTPUT UNITS (what route 1 convolves) and the
+// engine's cone velocity [m/s] (what route 2 needs), both at the host rate
+static EngineRun runEngine(CD57Engine& e, const std::vector<double>& jackVolts)
+{
+    EngineRun r;
+    std::vector<float> in(512), ot(512), oa(512);
+    const double cal = (double)e.params().inputCalVolts;
+    double acc = 0;
+    for (size_t i0 = 0; i0 < jackVolts.size(); i0 += 512) {
+        const int n = (int)std::min<size_t>(512, jackVolts.size() - i0);
+        for (int k = 0; k < n; ++k) in[(size_t)k] = (float)(jackVolts[i0 + (size_t)k] / cal);
+        e.process(in.data(), ot.data(), oa.data(), n);
+        for (int k = 0; k < n; ++k) {
+            r.xt.push_back((double)ot[(size_t)k]); r.vc.push_back(e.coneVelocityBlock()[(size_t)k]);
+            acc += std::pow((double)ot[(size_t)k] / e.outputScale(), 2);
+        }
+    }
+    r.vtRms = std::sqrt(acc / (double)jackVolts.size());
+    return r;
+}
+
+static void testThroughEngine()
+{
+    section("E. Route 2 reproduces route 1 through the ACTUAL engine speaker port (full amplifier + oversampler in the loop)");
+    info("synthetic H (known G*R_true built from the engine's own speaker parameters); the amplifier is real, the acoustics are not");
+    const double fs = 48000.0;
+    EngineParams p; p.oversampleLog2 = 1; p.load = 0; p.speakerHeating = false; p.instVol = 0.5f; p.tone = 0.7f; p.inputCalVolts = 1.0f;
+    CD57Engine e; e.prepare(fs, 512, gNetlist, p, gManifest);
+    const SpeakerTS& sp = e.amp().cfg.speaker;
+    auto G = [&](double f0) { return speakerVolumeVelocityPerVolt(sp, f0); };
+    const RTrue rt;
+    const size_t L = 8192, NG = 1 << 16;
+    const auto h = irFromSpectrum([&](double f0) { return G(f0) * rt(f0); }, fs, NG, L);
+    FactorSettings fset; fset.sampleRate = fs;
+    const auto fr = factorResidual(h, G, fset);
+
+    std::mt19937 rng(99); std::normal_distribution<double> nd(0.0, 1.0);
+    // 2 s of 1 mV rms white noise at the jack (small signal), then 0.5 s of silence so every ring-down (cone, transformer) completes
+    // inside the record: both routes are compared on COMPLETE responses, with no truncation edge in either one
+    std::vector<double> jack((size_t)(2.5 * fs), 0.0);
+    for (size_t i = 0; i < (size_t)(2.0 * fs); ++i) jack[i] = 0.001 * nd(rng);
+    const auto run = runEngine(e, jack);
+    info("drive: 1 mV rms white noise at the jack (rms over the 2.5 s record incl. silence) -> " + f(run.vtRms, 3) + " V rms at the speaker terminals (rated 12.5 W = 10 V rms), jack-to-terminal path is the full nonlinear circuit");
+
+    // route 1: y1 = h (*) x_t        route 2: y2 = r (*) c,  c = kOut * Sd * v / gRef   (the plugin's hybrid input)
+    const double kOut = e.outputScale();
+    std::vector<double> c(run.vc.size());
+    for (size_t i = 0; i < c.size(); ++i) c[i] = kOut * sp.Sd * run.vc[i] / fr.gRef;
+    const auto y1 = convolveFFT(run.xt, h), y2 = convolveFFT(c, fr.residual);
+    std::ostringstream t; double worst = -300;
+    for (auto b : {std::pair<double, double>{100, 300}, {300, 1000}, {1000, 2000}, {2000, 4000}, {4000, 6000}}) {
+        const double es = bandESR(y1, y2, fs, b.first, b.second);
+        t << f(b.first, 0) << "-" << f(b.second, 0) << ": " << f(es, 1) << " dB  ";
+        if (b.second <= std::min(fr.usableHiHz, 4000.0)) worst = std::max(worst, es);
+    }
+    info("route 2 (engine cone velocity -> residual) vs route 1 (engine terminal voltage -> H), ESR by band: " + t.str());
+    check(worst < -26.02, "through the real engine: route 1 and route 2 agree to better than the dossier's NRMSE 5 % (-26.02 dB) in 100 Hz - min(4 kHz, realised usable band)", "worst band ESR " + f(worst, 1) + " dB; realised usable band " + f(fr.usableLoHz, 0) + "-" + f(fr.usableHiHz, 0) + " Hz");
+
+    // no speaker connected (dummy load): no cone motion, so the hybrid is silent while a fixed voltage-to-mic IR would still "radiate"
+    {
+        EngineParams q = p; q.load = 2;
+        CD57Engine d; d.prepare(fs, 512, gNetlist, q, gManifest);
+        std::vector<double> j((size_t)(0.3 * fs)); for (auto& v : j) v = 0.01 * nd(rng);
+        const auto rd = runEngine(d, j);
+        double vmax = 0, xmax = 0; for (size_t i = 0; i < rd.vc.size(); ++i) { vmax = std::max(vmax, std::fabs(rd.vc[i])); xmax = std::max(xmax, std::fabs(rd.xt[i])); }
+        check(vmax < 1e-6 && xmax > 1e-3, "dummy-load output: terminal voltage present, cone velocity ~ 0, so the hybrid route is silent (no cone, no sound)", "max |v| " + f(vmax, 9) + " m/s, max terminal output " + f(xmax, 4));
+    }
+}
+
 int main()
 {
     std::cout << "validate_acoustic -- acoustic boundary and impulse-response path\n"
@@ -328,6 +632,8 @@ int main()
     testProvisionalOperator();
     testSpeakerTransfer();
     testIrPreparation();
+    testFactorisation();
+    testThroughEngine();
     std::cout << "\n" << nPass << " passed, " << nFail << " failed\n";
     return nFail ? 1 : 0;
 }

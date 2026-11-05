@@ -171,9 +171,10 @@ struct FactorSettings {
     // PROVISIONAL defaults: dossier Sec. 26 states the clean-response band 80 Hz-8 kHz; the low edge is widened to 50 Hz.
     double bandLoHz = 50.0, bandHiHz = 8000.0;
     // lambda floor, PROPOSED by this implementation: sqrt(lambda0) = 10^(floorDb/20) * max_band|G|.
-    // -50 dB keeps the Tikhonov weighting |G|^2/(|G|^2+lambda) within 0.5 dB up to ~5 kHz for the stock speaker model and bounds the
-    // residual gain to 1/(2*10^(-2.5)) = +44 dB re 1/max|G| (see FactorResult::gainBoundDb).
-    double floorDb = -50.0;
+    // -60 dB keeps the Tikhonov weighting |G|^2/(|G|^2+lambda) within 0.5 dB up to ~7.7 kHz for the stock speaker model (whose |G|
+    // is 52 dB below its peak at 8 kHz) and bounds the residual gain to 1/(2*10^(-3)) = +54 dB re 1/max|G| (FactorResult::gainBoundDb).
+    // A higher floor trades usable bandwidth for a smaller worst-case gain and a shorter non-causal pre-ringing.
+    double floorDb = -60.0;
     // lambda grows above bandHiHz by this many dB (power) per octave: R rolls off beyond the identifiable band, no brick wall.
     double outOfBandDbPerOct = 12.0;
     double toleranceDb = 0.5;     // Sec. 26 clean-magnitude target, used to report the regularisation-limited band
@@ -184,7 +185,12 @@ struct FactorResult {
     std::vector<double> residual;     // causal FIR r[n]: P_mic = r (*) (U_cone / gRef), in the units of h (U_cone/gRef is "volts equivalent")
     double gRef = 0.0;                // max over the band of |G|  [(m^3/s)/V]
     double gainBoundDb = 0.0;         // guaranteed:  |R(f)| * gRef / |H(f)| <= 1/(2*10^(floorDb/20)) = this many dB (frequency-independent bound)
-    double usableLoHz = 0.0, usableHiHz = 0.0;   // contiguous band around the |G| peak where |G R| = |H| to within toleranceDb (regularisation-limited)
+    // regularisation-limited band: contiguous around the |G| peak where the Tikhonov weighting |G|^2/(|G|^2+lambda) is within toleranceDb
+    double regLimitLoHz = 0.0, regLimitHiHz = 0.0;
+    // REALISED usable band: contiguous around the |G| peak where the actual FIR still satisfies |G R - H| <= eps |H|_smooth,
+    // eps = |10^(toleranceDb/20) - 1| (i.e. the complex error of a toleranceDb magnitude error), |H|_smooth = 1/3-octave power mean.
+    // Includes the error from the dropped non-causal part and from the FIR length, which the analytic limit above does not.
+    double usableLoHz = 0.0, usableHiHz = 0.0;
     double nonCausalDb = -300.0;      // energy of R at negative time (dropped) relative to total, dB
     double truncationDb = -300.0;     // energy of R beyond the FIR length (dropped) relative to total, dB
     std::size_t fftSize = 0;
@@ -216,6 +222,7 @@ FactorResult factorResidual(const std::vector<double>& h, GFunc&& G, const Facto
     std::vector<cplx> A(N, cplx(0, 0));
     for (std::size_t i = 0; i < L; ++i) A[i] = h[i];
     fftInPlace(A);
+    const std::vector<cplx> Hs(A.begin(), A.begin() + (std::ptrdiff_t)(N / 2 + 1));
     for (std::size_t k = 0; k <= N / 2; ++k) {
         const double f = (double)k * df;
         cplx r = A[k] * std::conj(Gn[k]) / (std::norm(Gn[k]) + lambda(f));
@@ -223,16 +230,16 @@ FactorResult factorResidual(const std::vector<double>& h, GFunc&& G, const Facto
         A[k] = r;
         if (k > 0 && k < N / 2) A[N - k] = std::conj(r);
     }
-    // usable band: |G_n|^2/(|G_n|^2 + lambda) within tolerance, scanning outward from the |G| peak
+    std::size_t kp = 1;                                  // bin of the |G| peak inside the identifiable band
     {
-        const double tol = std::pow(10.0, -s.toleranceDb / 20.0);
-        std::size_t kp = 1; double best = 0;
+        double best = 0;
         for (std::size_t k = 1; k <= N / 2; ++k) { const double f = (double)k * df; if (f >= s.bandLoHz && f <= hi && std::abs(Gn[k]) > best) { best = std::abs(Gn[k]); kp = k; } }
+        const double tol = std::pow(10.0, -s.toleranceDb / 20.0);
         auto W = [&](std::size_t k) { const double g2 = std::norm(Gn[k]); return g2 / (g2 + lambda((double)k * df)); };
         std::size_t klo = kp, khi = kp;
         while (klo > 1 && W(klo - 1) >= tol) --klo;
         while (khi < N / 2 && W(khi + 1) >= tol) ++khi;
-        out.usableLoHz = (double)klo * df; out.usableHiHz = (double)khi * df;
+        out.regLimitLoHz = (double)klo * df; out.regLimitHiHz = (double)khi * df;
     }
     fftInPlace(A, true);
     double eTot = 0, eNeg = 0, eTail = 0;
@@ -248,6 +255,26 @@ FactorResult factorResidual(const std::vector<double>& h, GFunc&& G, const Facto
     }
     out.residual.resize(Lr);
     for (std::size_t n = 0; n < Lr && n < N / 2; ++n) out.residual[n] = A[n].real();
+
+    // realised usable band from the FIR actually delivered
+    {
+        std::vector<cplx> B(N, cplx(0, 0));
+        for (std::size_t n = 0; n < Lr && n < N / 2; ++n) B[n] = out.residual[n];
+        fftInPlace(B);
+        std::vector<double> cum(N / 2 + 2, 0.0);          // prefix sums of |H|^2 for the 1/3-octave power mean
+        for (std::size_t k = 0; k <= N / 2; ++k) cum[k + 1] = cum[k] + std::norm(Hs[k]);
+        const double eps = std::fabs(std::pow(10.0, s.toleranceDb / 20.0) - 1.0);
+        auto ok = [&](std::size_t k) {
+            const std::size_t hw = std::max<std::size_t>(2, (std::size_t)std::lround(0.12 * (double)k));
+            const std::size_t a = k > hw ? k - hw : 0, b = std::min(N / 2, k + hw);
+            const double smooth = (cum[b + 1] - cum[a]) / (double)(b - a + 1);
+            return std::norm(Gn[k] * B[k] - Hs[k]) <= eps * eps * smooth;
+        };
+        std::size_t klo = kp, khi = kp;
+        while (klo > 1 && ok(klo - 1)) --klo;
+        while (khi < N / 2 && ok(khi + 1)) ++khi;
+        out.usableLoHz = (double)klo * df; out.usableHiHz = (double)khi * df;
+    }
     return out;
 }
 
