@@ -49,6 +49,10 @@ if(CD57_BUILD_TOOLS)
         DEPENDS cd57_gen_lu COMMENT "Regenerating generated/LuKernel.h" VERBATIM)
     enable_testing()
     add_test(NAME dossier_validation COMMAND cd57_validate --quick --report ${CMAKE_CURRENT_BINARY_DIR}/validation_quick.md)
+    # --- acoustic tests ---
+    add_executable(validate_acoustic tools/validate_acoustic.cpp)
+    target_link_libraries(validate_acoustic PRIVATE cd57_core)
+    add_test(NAME acoustic_validation COMMAND validate_acoustic)
 endif()
 
 # ------------------------------------------------------------------ plugin (VST3 + Standalone)

@@ -120,6 +120,10 @@ public:
     const std::string& manifestError() const { return manifestError_; }
     AmpCircuit& amp() { return amp_; }
     const EngineParams& params() const { return applied_; }
+    // Last process() block at the host rate (first n entries): cone velocity [m/s] for the hybrid acoustic route (dossier
+    // Sec. 27), and the output scale kOut that maps terminal volts to output units (identical to the one process() applies).
+    const std::vector<double>& coneVelocityBlock() const { return vcB_; }
+    double outputScale() const { return std::pow(10.0, (double)applied_.outputDb / 20.0) / (double)applied_.outputRefVolts; }
 
     EngineDiag diag() const
     {
