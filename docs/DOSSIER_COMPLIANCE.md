@@ -106,8 +106,8 @@ validation/diagnostic; **S3** robustness / hygiene / documentation.
   The only 6V6 curves the dossier does contain (JJ 6V6S, Fig. 11) are explicitly **not used** as a constraint ("cross-check ... NOT used").
   Shape parameters `Vk = 55`, `q = 1.5`, `Ex ~ 1.35`, `mu ~ 11` are priors, not data.
 * Measured (copy of the script run in `/tmp`, repo untouched): model / JJ-sheet current ratio if the sheet is triode-connected:
-  0.99-1.03 at 150-200 V, Vg -2 V; **0.90, 0.89, 0.78, 0.81, 0.71** at 150-200 V with Vg -6...-20 V; **0.57, 0.21, 0.45** at 50-100 V.
-  The manifest note says "agrees within a few % at 150-200 V": true for 3 of the 8 points in that range only. The class-AB1 constraint
+  1.03, 0.99 (150-200 V, Vg -2 V), then **0.98, 0.90, 0.89, 0.78, 0.81, 0.71** at 150-200 V with Vg -6, -12, -20 V (200/-6, 150/-6, 200/-12, 150/-12, 200/-20, 150/-20), and **0.85, 0.57, 0.68, 0.21, 0.45** at 100/-2, 50/-2, 100/-6, 50/-6, 100/-12.
+  The manifest note says "agrees within a few % at 150-200 V": true for 3 of the 8 points in that range only (worst -29 %). The class-AB1 constraint
   the script itself sets (70 mA) ends at **59.6 mA** (-15 %).
 * The amplifier does not run where any of this data lives: idle point is Vpk 347 V, Vsk 298 V, Vgk -21.1 V (probe `p7_dc.cpp`, `p18_tube.cpp`):
   gm 3.19 mS, rp 69 k, Ip 38.8 mA, Is 3.38 mA. Cutoff is a long Koren-form tail (Vgk -40 V: 6.4 mA; -50 V: 2.1 mA; -60 V: 0.68 mA, plate 347 V / screen 298 V),
@@ -136,7 +136,7 @@ validation/diagnostic; **S3** robustness / hygiene / documentation.
 
   So (i) over the model's own sensitivity interval the headline number moves from -17 % to +27 % of 12.5 W; (ii) at the shipped value the true
   5 %-THD power is **13.55 W (+8 %)**, not the 12.85 W printed in the report: the x1.1 amplitude grid (0.83 dB) with "largest P below 5 %"
-  quantises the answer low by up to a grid step; (iii) THD at exactly 12.5 W is 2.9 % (the spec "12.5 W at < 5 % THD" is a
+  quantises the answer low by up to a grid step; (iii) THD at exactly 12.5 W is about 3.1 % (the spec "12.5 W at < 5 % THD" is a
   *minimum*; the model exceeds it, but the check is written as a two-sided +-10 % window); (iv) the THD curve (probe output) is smooth and monotone:
   1.2 % at 5.3 W, 2.7 % at 12.0 W, 5.3 % at 13.6 W, 18 % at 14.9 W.
 * The report does say "CALIBRATION" in an INFO line, but counts the check in "27 passed" with the independent ones, and no sensitivity study
@@ -153,8 +153,8 @@ validation/diagnostic; **S3** robustness / hygiene / documentation.
   "no ... hidden solver failures".
 * Reproduce `p9_stress.cpp` (speaker load, vol 0.9, 1 kHz, 0.4 s): jack amplitude 0.05 / 0.2 / 0.6 V: 0 failures (0 / 1.0 / 2.7 % of steps sub-stepped);
   **10 V: 36 failures; 80 V: 89 failures**; inputCal 5 V + trim +24 dB (79 V at the jack, both are plugin parameter ranges): **744 failures** in 102 400 steps;
-  1e6 FS input: 774 failures and **165 ms for one 512-sample block** (15x real time; worst-case Newton work per sample is about 63x the typical,
-  maxIter 20 x (1 + 2 + 4 + 8 + 16 + 32) sub-steps). The report's failure check stops at 600 mV at the jack.
+  1e6 FS input: 774 failures and **165 ms for one 512-sample block** (15x real time; the worst case per sample is
+  20 iterations x (1 + 2 + 4 + 8 + 16 + 32 sub-steps) = 1 260 Newton iterations against a typical 1.25). The report's failure check stops at 600 mV at the jack.
   The fall-back for an unrecovered step is "hold the last accepted state for one step" (counted, shown in the UI) - defined and visible, as Sec. 31 requires, but its rate inside the supported range is not stated.
 * NaN: one NaN sample in a 512-block -> the whole block is output as zeros, `recover()` re-runs `initialiseQuiescent` on the audio thread
   (**56 ms** for a 10.7 ms block; Inf 50 ms), and the next block starts from the quiescent state (history lost).
@@ -174,8 +174,8 @@ validation/diagnostic; **S3** robustness / hygiene / documentation.
 ### D9 (S2) Heap allocation in the audio callback (README and TRACEABILITY say there is none)
 
 * Reproduce `p15_alloc.cpp`, `p16_alloc2.cpp` (global `operator new` counter around `CD57Engine::process`):
-  * every call that falls back to **sub-stepping** allocates (`Network::step` builds a local `Snapshot` of eight `std::vector`s): **10.4 allocations per 512-sample block
-    on average (worst 27) at 0.3 V at the jack, 14.8 (worst 36) at 0.6 V**, 0 below ~0.1 V. Any driven guitar signal will hit it.
+  * every step that falls back to **sub-stepping** allocates (`Network::step` builds a local `Snapshot` of eight `std::vector`s): **10.4 allocations per 512-sample block
+    on average (worst 27) at 0.3 V at the jack (vol 0.9), 14.8 (worst 36) at 0.6 V**, 0 up to 0.1 V. Any signal loud enough to need sub-stepping hits it.
   * first `process()` after `prepare`: 4 allocations (`Oversampler::up/down` use `assign` on scratch vectors that `prepare` never sizes).
   * automating market / V1 / V2 / rectifier / source / specimen variation: 7-16 allocations per change (`makeConfig` -> `Manifest::apply` string temporaries).
   * `recover()` after non-finite output and (for the engine, not the plugin) an in-place oversampling change: 3 and 2 360 allocations plus the whole
@@ -196,9 +196,9 @@ validation/diagnostic; **S3** robustness / hygiene / documentation.
 
 ### D11 (S3) Provenance and manifest hygiene
 
-* Only **15 of the 55** manifest entries are read by the engine (`Manifest::apply`: pt voltage/Rs, pot total/contact, 10 speaker values). The 5 output-transformer values, the four
+* Only **14 of the 55** manifest entries are read by the engine (`Manifest::apply`: pt voltage/Rs, pot total/contact, 10 speaker values). The 5 output-transformer values, the four
   `acoustic_*` values, the tube fits, `source_impedance`, the entire `calibration` block (loader never reads it) and `speaker_Sd` (consumed into `SpeakerTS::Sd`, which nothing uses)
-  are documentation only: the same numbers are duplicated in the netlist / `Acoustic.h` / `TubeFits.h`, so editing the manifest silently changes nothing.
+  are documentation only (13 of the 14 read entries affect the model; `speaker_Sd` does not): the same numbers are duplicated in the netlist / `Acoustic.h` / `TubeFits.h`, so editing the manifest silently changes nothing.
   Sec. 30: "A model loader should fail clearly when a mandatory calibrated field is absent" - the `calibration` fields are never checked.
 * `Devices.h` line 5 says the derivatives are "checked against finite differences in the tests". `Network::checkJacobian` exists but **no test calls it**. I ran it (`p12_jac.cpp`) on
   38 states of a heavy-drive transient: worst relative error **3.1e-5**, so the claim is true but unsupported by the suite.
@@ -234,37 +234,198 @@ validation/diagnostic; **S3** robustness / hygiene / documentation.
   48 kHz x 2 (default): +0.07 dB at 8 kHz, -0.20 dB at 16 kHz; **48 kHz x 1: +0.33 dB at 8 kHz, -1.31 dB at 16 kHz; 44.1 kHz x 1: +0.40 dB at 8 kHz, -1.94 dB at 16 kHz**.
   All still inside the 0.5 dB / 80 Hz-8 kHz target, but the report should state the rate dependence.
 
+* The same table is evaluated at **B+1 = 404 V, not the nominal 372 V**: after the x1000 capacitor trick `initialiseQuiescent(0.05)` leaves the 16 mF reservoirs far from their steady
+  state (probe `p22_cpp_ref.cpp`: b1 404.3 V, b2 346.2 V, b3 251.5 V, 6V6 plate 398.9 V, cathode 23.2 V versus 372.1 / 319.5 / 231.7 / 368 / 21.1 V stock). The reported gains
+  (e.g. 54.69 dB at 1 kHz) are therefore at a bias point 8 % hotter than the amplifier the rest of the report describes. The stamps-vs-transient comparison is still valid; the numbers are not "the" small-signal gain.
+
+### D16 (S3) An assumed transformer saturation law is active, which Sec. 29 says should wait for data
+
+* Sec. 29 "What should wait for data": "... assign a transformer saturation law ...". The netlist assigns `phisat = 0.060 V*s` (tanh core, interval 0.04-0.09, ASSUMED). It does engage:
+  at full drive the peak tanh argument is **0.72-0.73** at 41 and 82 Hz (`p23_misc.cpp`). Effect of the assumed value (`p26_sat.cpp`, vol 0.8, dummy 8 ohm, 41.2 Hz, 40 mV pk): phisat 0.04 / **0.06** / 0.09 /
+  none -> **4.91 / 5.61 / 5.96 / 6.23 W** and THD **31.3 / 24.7 / 22.5 / 21.1 %**. At 82.4 Hz (low E) the spread is < 1 % in power and < 0.3 pp THD. So the assumption is
+  immaterial for guitar range and material only below ~60 Hz. It is labelled and has an interval; it is nevertheless exactly the kind of assigned law the dossier says not to assign yet.
+
 ---
 
 ## 2. Adversarial review of the PASS results in `docs/VALIDATION_REPORT.md`
 
-| # | Check | Can it fail? | Verdict |
-|---|---|---|---|
-| 1 | manifest loads | yes (loader rejects missing status / interval) | genuine but weak: only 15 of 55 manifest entries drive the model (see D-manifest, TODO-AUDIT) |
-| 2 | KCL residual < 1 uA | yes | genuine; residual measured at convergence of the same Newton the solver uses (not independent of the stamps) |
-| 3-6 | input Z 1 M / 136 k, -6 dB | yes | genuine and not fitted: the netlist follows Fig. 7 (verified against the figure crop) |
-| 7 | 12.5 W / <5 % THD | yes, but it is the calibration anchor | `ptHalfVrms = 360 V` was chosen to make it pass (manifest says so); it is reported as PASS in the same list as independent checks. Search is over 3 volumes x input levels in x1.1 steps and takes the **maximum** power with THD < 5 %, window +-10 % (11.25-13.75 W) |
-| 8 | transient vs "independent" AC solver | partly | shares the netlist, the element lists, `evalTriode/evalPentode/evalDiode` and `corePhi/corePhiPrime` with the transient solver; independent only in stamps/LU/time integration. Runs on a modified circuit (supply caps x1000) |
-| 9-11 | silent channel loads active channel; tone monotone; endpoints finite | yes | genuine (AC solver only; no nonlinear check) |
-| 12 | burst/recovery memory present | effectively no | see D3 |
-| 13 | block size | yes | genuine (D4) |
-| 14 | automation finite | weak | only asserts no NaN, not absence of clicks |
-| 15-16 | LU kernel installed / identical | trivial | generic and unrolled paths execute the same flop sequence, so bit-equality is expected; says nothing about numerical conditioning |
-| 17 | no unrecovered solver failures | yes | genuine but counts only fallbacks that were *detected* |
-| 18 | H3 agrees across 44.1/48/96 within 1.5 dB | chosen metric | THD differs 5.66 % vs 6.27 % (about 10 % relative) and the dossier's own tolerance is 1 dB for significant harmonics |
-| 19 | alias drops > 6 dB with 2x | meaningless | see D1 |
-| 20-21 | ripple at 2 x mains | yes (1x vs 2x) | resolution is 48 000/8192 = 5.9 Hz and the tolerance is +-6 Hz, so it only rejects "wrong harmonic"; genuine for that |
-| 22 | efficiency 20-65 % | very wide band | passes for almost any physically sensible amp |
-| 23-25 | K_in worked example, rated V | yes (arithmetic) | genuine but trivially so |
+Question asked of every check: could it fail, were stimulus/threshold chosen so it passes, does it measure what its title says. "Genuine" = it can fail and measures its title.
 
-(Rows 1, 7, 8, 14-18, 22 get their experiments in later checkpoints.)
+| # | Check (report wording) | Verdict | Evidence |
+|---|---|---|---|
+| 1 | manifest loads and validates | genuine, narrow | the loader enforces status / interval / null rules, but only 14 of 55 entries are read and 13 affect the model; `calibration` block never read (D11) |
+| 2 | max nodal KCL residual < 1 uA | genuine for the stock 5Y3 only | 5.7e-7 A measured (`p8`); the silicon-rectifier option reaches **52.9 A** while "converged" (D7); the residual is evaluated by the same assembly the solver uses |
+| 3-6 | input Z 1 M / 136 k, -6 dB, Mic same | genuine, not fitted | my jack matrix (`p5_jacks`): Inst1 1000.1 k, Inst2 136.0 k and -6.03 dB, Mic1/Mic2 identical; netlist topology confirmed against Fig. 7 crops (jack block, tone/volume wiring, cathodyne, supply nodes) |
+| 7 | max power with THD < 5 % within 10 % of 12.5 W | **calibration, not evidence** | one free parameter (PT voltage) was tuned to it; +-25 % over its own interval; coarse x1.1 grid reports 12.85 W where the interpolated crossing is 13.55 W (D6) |
+| 8 | transient vs "independent" AC solver, worst 0.01 dB | genuine for stamps/integration, **not independent** of netlist and device code | shares netlist parse, element lists, `evalTriode/Pentode/Diode`, `corePhi/corePhiPrime`; run on a modified supply (caps x1000) at B+1 = 404 V and at 192 kHz internal rate (D15). Real independence supplied by my Python re-implementation: DC within 0.23 V, AC within **0.0025 dB / 0.003 deg** (Section 5 below) |
+| 9 | silent Mic channel loads the Instrument channel | genuine | -17.7 dB at Mic vol 1.0 (report) and my sweep: 23.45 -> 5.99 dB; below Mic vol 0.8 the effect is < 1.1 dB |
+| 10 | tone clockwise raises HF/LF at two volumes | genuine but only for the Instrument channel | on the Mic channel with Instrument vol 0 the HF balance **falls** from tone 0.5 to 1.0 (500 pF bright cap becomes a shunt): Mic vol 0.5 gain at 5 kHz 13.3 dB (tone 0.5) vs 4.8 dB (tone 1.0). Physically implied by the dossier's connection map, but not stated by the report |
+| 11 | pot endpoints solve | genuine, weak | finite at endpoints; the 20 ohm contact resistance leaves a residual of -38 dB (1 kHz) at Instrument vol 0 and a 47.7 dB step between knob 0.00 and 0.05 (`p6_pots`) |
+| 12 | burst/recovery memory present and bounded | **cannot fail** | D3 |
+| 13 | independent of host block size | genuine | D4 (bit-exact in 32 configurations, heating on) |
+| 14 | automation keeps samples finite | weak | `p10_auto`: no click and no zipper in reality (abrupt 0.3->0.9 reaches the target over ~90 ms, slow sweep sidebands identical to constant-volume run); the check itself only tests `isfinite` |
+| 15-16 | LU kernel installed / same as generic | trivial identity | 0.000 difference in 7 extreme control states with 0 guarded pivots (`p23_misc`): conditioning at the extremes is actually fine, but the identity test cannot detect an ill-conditioned matrix |
+| 17 | no unrecovered failures up to 600 mV | genuine but range too small | 36 failures at 10 V, 89 at 80 V, 744 at inputCal 5 V + 24 dB (D7) |
+| 18 | H3 agrees 44.1/48/96 within 1.5 dB | stimulus/metric artefact | D8: the THD column is a window artefact; true spread 0.12 dB |
+| 19 | 2x lowers the strongest alias > 6 dB | **meaningless** | D1 |
+| 20-21 | ripple at 2 x mains (60 / 50 Hz) | genuine, coarse | resolution 5.9 Hz vs +-6 Hz tolerance: only rejects the wrong harmonic. Idle hum is a pure 2 x mains line, 6.35 mV rms (60 Hz) / 8.12 mV (50 Hz) at the terminals, 64 / 62 dB below 10 V (`p21_hum`) |
+| 22 | efficiency 20-65 % | non-discriminating | passes for almost any amplifier |
+| 23-25 | K_in worked example, 10 V rated | genuine, arithmetic | reproduces the dossier numbers exactly |
 
 ---
 
-## 3. Requirement matrix
+## 3. Requirement matrix (dossier Sec. 02-31)
 
-`TODO-AUDIT` (next checkpoint).
+Status: **MET** (evidence checked by me) / **PARTIAL** / **MISSING** (software could do it, not done) / **HW** (needs hardware or data the dossier says does not exist) / **N/A** (the project chose a different, permitted route).
+Evidence: `pNN` = my probe in `/tmp/claude-0/audit/probes`, `file:line` = repo source read, `Dn` = defect above.
 
-## 4. Requirements that are impossible without hardware data
+| ID | Sec | Requirement (condensed) | Status | Evidence |
+|---|---|---|---|---|
+| R01 | 01 | Define the target at a measurable boundary | MET | manifest `reference_boundary` = input_jack_to_speaker_terminals; `CD57Engine` outputs terminal volts |
+| R02 | 01 | Use the five evidence labels | MET | all 94 netlist elements carry `ev=`; manifest `status` vocabulary mirrors them. None of the ASSUMED netlist elements carries an interval (intervals only in the manifest) |
+| R03 | 02 | Record serial, market voltage, date, tube markings, speaker label before claiming a unit match | HW | `specimen_serial: null`; market table (9 variants) implemented in `CD57Engine.h:23` |
+| R04 | 02 | Preserve full tube marking in the specimen record | HW | manifest note only |
+| R05 | 02 | Model the speaker jacks as part of the load connection | PARTIAL | five load modes (speaker, speaker+8 ohm ext, 8/4/16 ohm dummy); jack switching topology of the manual not modelled (manual not in dossier text) |
+| R06 | 02 | 10.0 V rms / 14.14 V pk anchor, "not a complete output specification" | MET | validation Sec. 10; D6 for the caveat |
+| R07 | 04 | Label HISTORICAL uses; four separate branches (5E3, earlier reissue, modern nominal, specimen); a change states which branch it modifies | PARTIAL | one netlist, one branch ("historical 5E3 + modern nominal"); labels yes, branch separation/delta no |
+| R08 | 04 | Per parameter: value, units, source, source revision, evidence label, uncertainty, serial range; measured stored beside nominal | PARTIAL | manifest has value/unit/status/source, interval for `assumed` only; no source revision, no serial range, no measured-vs-nominal fields |
+| R09 | 05 | Expose speaker-terminal voltage **and current** before adding microphone sound | PARTIAL | voltage yes; no current output; `speakerCurrent()` is coil current and wrong in dummy mode (D10) |
+| R10 | 05 | Acoustic stage has its own calibrated boundary | PARTIAL | separate stage/output mode; level normalised at 1 kHz, no absolute Pa/V (`Acoustic.h::calibrate1k`) |
+| R11 | 05 | Document that internal parameter combinations can fit the same output | MET | README "Limitations", manifest `profile_note` |
+| R12 | 06 | Calibrate the jack voltage represented by a sample; 0 dB trim is not a Fender number | MET | `inputCalVolts`, K_in worked example verified; actual rig calibration HW |
+| R13 | 06 | Every plug state is its own connection graph | MET | `p5_jacks`: 4 single-jack states + 6 patch cables x 4 guitar jacks, impedances and gains differ as physics predicts |
+| R14 | 06 | Input 2 is not a constant -6 dB with the same impedance | MET | circuit-derived: 136.0 k, -6.03 dB, input capacitance via real nodes (`p5`) |
+| R15 | 06 | Four jack sockets explicit; two occupied jacks of one channel; patch cable connects nodes | PARTIAL | four sockets and tip-to-tip patch implemented (Inst1 + I2-M1: Zin 532 k, both grids driven -0.55 / -1.12 dB); **only one source can be plugged**, so two-source mixing and one-source-per-channel interaction cannot be exercised |
+| R16 | 06 | Document the supported jack subset and validate it first | PARTIAL | documented in README; the report validates only the 4 single-jack states |
+| R17 | 06 | Test table: Inst1, Inst2, Mic1/2, both jacks one channel, one input per channel, patch, no source | PARTIAL | all rows measurable with one source in `p5`/`p21` (no-source idle: finite, 6.35 mV hum); the two two-source rows are not representable |
+| R18 | 06 | Electrode capacitances between actual nodes, no fixed Miller capacitor | MET | netlist `Cgk/Cgp/Cpk` per tube; 6V6 capacitances backward-Euler by design |
+| R19 | 07 | Two triodes with own Ip(Vpk,Vgk); shared cathode sums both currents; no crossfade | MET | netlist V1A/V1B on node k1; shared-cathode crosstalk -75 dB (`p5`) |
+| R20 | 07 | Consistent sign convention; one-stage charge-conservation test before the full amp | PARTIAL | KCL < 1 uA overall; analytic Jacobian matches finite differences to 3e-5 (`p12`); **no one-stage charge test and `checkJacobian` is never called by the suite** (D11) |
+| R21 | 07 | Solve DC at actual supply before audio; check plate/cathode voltages | MET | `initialiseQuiescent`; table in `p7`: V1 plate 111 V / k 1.98 V, V2A 151 V, cathodyne plate 189 V / cathode 44.2 V, 6V6 plate 368 V / k34 21.1 V. Idle 6V6 plate dissipation 13.5 W (external rating 12 W) |
+| R22 | 07 | Local gain approximation checked; fit the whole surface, not one number | PARTIAL | surface fitted to JJ transfer sheets; RCA anchor mu/rp +10 % (D11) |
+| R23 | 07 | Keep the bypass capacitor's physical charge state | MET | `Ck1` 25 uF state; block-independent (D4) |
+| R24 | 07 | Specimen triode mismatch preserved; random variation only as separate creative feature | MET / HW | variation default 0 (`variationAmount`), seeded; measured mismatch HW |
+| R25 | 08 | Volumes and tone as one coupled passive circuit | MET | `p6_pots`; Fig. 7 wiring verified |
+| R26 | 08 | Electrical pot fraction stored separately from knob angle | MET | `PotMap::alpha` |
+| R27 | 08 | Default = measured taper when available, temporary curve identified as assumption | MET (assumption labelled) | `volume_pot_taper` unknown + `..._provisional` assumed; UI label "Volume Taper (assumed)"; measured map HW |
+| R28 | 08 | Connection map (0.1 uF to wiper; one end to mix, other to ground; tone wiper to mix; 500 pF to Bright wiper; 0.005 uF to ground) | MET | netlist lines; verified against Fig. 7 crops |
+| R29 | 08 | Unused channel keeps plate impedance and coupling cap | MET | -17.7 dB at the other volume's maximum |
+| R30 | 08 | Pot = two resistances at the wiper; endpoints merged or small contact resistance; no tone end directly grounded | MET | 20 ohm contact (labelled `proposed`); tone ends via caps. Note the 47.7 dB first step (Sec. 2 row 11) |
+| R31 | 08 | Do not present an assumed exponent as the modern taper | MET | assumption in manifest and UI |
+| R32 | 08 | Dense sampling near low volume | PARTIAL | report samples 0.2/0.5/0.9; I sampled 0, 0.005, 0.01, 0.02 ... (`p6`): model gain -38 / -9.5 / -3.6 / +2.2 dB |
+| R33 | 08 | Solve the full network or verify a state-space form against an independent solver | MET | AC solver + my independent re-implementation (Section 5) |
+| R34 | 08 | Sweep tone at several volumes, inactive volume with active fixed, low/medium/high drive | PARTIAL | AC sweeps yes (`p6`); drive-level dependence of control interaction not swept anywhere |
+| R35 | 09 | Gain stage and cathodyne separate electrical functions; no ideal inverter | MET | netlist V2A, V2B with real loads |
+| R36 | 09 | Both following power-valve grids and coupling caps in the same solve | MET | netlist `Cc_3/Cc_4`, `Rgl_*`, `Rgs_*` |
+| R37 | 09 | Cathodyne grid return to the 1.5 k / 56 k junction (bootstrap) | MET | `Rgl_2b g2b j`; DC: grid 43.0 V, cathode 44.2 V |
+| R38 | 09 | Test bursts followed by silence/low level; track both cathodyne outputs and both power grids | PARTIAL | burst test exists but its metric is invalid (D3); trajectories not reported (my `p3_burst` prints them) |
+| R39 | 10 | Two power-valve models exposing Ip, Is, Ig; supply/cathode currents sum | MET (structure) | `evalPentode`; quality D5 |
+| R40 | 10 | Keep shared-cathode state across blocks | MET | D4 |
+| R41 | 10 | Blocking distortion via explicit capacitor equation and grid-current path | MET | `p3`: after a 120 mV burst g3 +24.6 V / g4 -35.7 V coupling transients, 1 kHz gain dip to 0.65x, recovery 65 ms to 10 % |
+| R42 | 10 | Correct centre-tap convention; record winding reference (full / half / secondary) | MET | netlist comment "Ns = 1, secondary-referred"; manifest names `_full`, `_half`; plate-to-plate 8 kohm by construction (read) |
+| R43 | 10 | No fixed "even harmonics" control | MET | none exists |
+| R44 | 10 | Describe actual conduction behaviour, not a class label | MISSING | no per-valve current waveform / conduction-angle report |
+| R45 | 11 | Rectifier conduction + transformer R + reservoir + downstream loads; no single sag amount | MET | explicit 5Y3 diodes, 3 x 16 uF nodes; idle ripple B+1 26.8 V pp, B+2 0.4, B+3 ~0 (`p7`) |
+| R46 | 11 | No bleeder inserted for convenience | MET | only GMIN 1e-12 S |
+| R47 | 11 | Nonlinear rectifier law with transformer resistance | MET (candidate) | fit to digitised right panel; **held-out left panel**: model 7-12 V (about 3 %) below the sheet at 10 mA and 8-18 V at 120 mA for Utr 220-350 V (`p25_y3`, sheet read by eye +-8 V) |
+| R48 | 11 | Preserve mains phase; test 50 and 60 Hz | MET | `phase_`; 100 / 120 Hz ripple found (coarse, Sec. 2 rows 20-21) |
+| R49 | 11 | Startup: quiescent init or explicit controlled trajectory; no numerical-pop-as-standby | MET | `p10`: power-off decays in 0.6 s (heaters 2 s), power-on rises over > 3 s; no standby switch modelled |
+| R50 | 11 | Averaged supply validated against explicit | N/A | no averaged model |
+| R51 | 12 | Ideal CT transformer + R + leakage + magnetising branch; parasitic C only if measured | MET | `Xfm`: Ra=Rb=125, Rs=0.35, Ll 8+8 mH, 24 uH, 25 H; no capacitance |
+| R52 | 12/29 | Saturation law should wait for evidence; no elaborate hysteresis | PARTIAL | tanh law assigned (labelled assumed, interval) and active at LF (D16) |
+| R53 | 13 | Constitutive detail (ESR, leakage, voltage dependence) only when measured | MET | capacitance only; ESR/leakage absent (permitted: "when measurements support it") |
+| R54 | 13 | Separate capacitor coefficients per role | MET | none shared |
+| R55 | 13 | Deterministic hum separate from stochastic noise; seed; noise-free circuit testable | MET | noiseScale 0 default; hum is circuit ripple (pure 2 x mains line, `p21`) |
+| R56 | 13 | Sensitivity analysis one parameter at a time before Monte Carlo; no unrelated distributions for one component | PARTIAL | variation feature draws independent per element (creative, optional); **no one-at-a-time sensitivity study**; I ran PT voltage (D6) |
+| R57 | 14 | Netlist equals the historical baseline table | MET | every value checked: 4 x 68 k, 2 x 1 M, 2 x 100 k, 820/25 uF, 2 x 0.1 uF, 1 M pots (1e6 via `potTotal`), 500 pF/0.005 uF, 100 k/1.5 k/25 uF, 0.022 uF, 56 k/56 k, 1.5 k/1 M, 0.1 uF/220 k x 2, 250 ohm/25 uF, 3 x 16 uF, 5 k, 22 k |
+| R58 | 14 | Time-scale table only as sanity check, no seven one-pole envelopes | MET | none in the DSP |
+| R59 | 15 | Fitting data per element (Ip surface, cutoff, grid current, electrode capacitances; 6V6 plate+screen+grid; 5Y3 forward+supply) | PARTIAL | triode surfaces fitted to JJ sheets (rms 0.07 / 0.08 mA, 4.5 / 9.1 % relative); grid law assumed; capacitances datasheet-class; **6V6 not fitted to dossier data (D5)** |
+| R60 | 16 | Weighted objective; reserve validation segments; report fitted domain and error outside it | MISSING | `fit_tubes.py` fits every digitised point; no held-out set; no extrapolation error reported (D5) |
+| R61 | 16 | Fit screen and grid current separately with current conservation | PARTIAL | conservation exact; screen partition shape and grid law are assumptions |
+| R62 | 16 | No positive-grid clamp to hide solver failures | MET | smooth law, no clamp |
+| R63 | 16 | Continuity of current and derivatives, low-voltage and boundary limits | PARTIAL | Jacobian 3e-5 (`p12`); not tested in-suite |
+| R64 | 16 | Overflow-safe softplus, scaling, double precision, no hard state clipping | MET | `Devices.h`; Newton step caps are not state clips |
+| R65 | 17 | Linear coupled electromechanical model | MET | cone velocity per volt: circuit vs closed form 1.0000 and 0.00 deg, 30 Hz-3 kHz (`p13`); radiation load F_acoustic omitted |
+| R66 | 17 | Do not substitute another driver's parameters; name generic substitutions | MET | generic values labelled `assumed` with intervals |
+| R67 | 17 | Complex voltage/current fit; large-signal Bl(x), Kms(x), L(x) | HW | `unknown` entries |
+| R68 | 18 | Short-term nonlinear vs slow heating separated; single thermal compartment | PARTIAL | slow thermal only; phantom heating in dummy mode (D10) |
+| R69 | 18 | Do not assign copper tempco unverified | MET (labelled) | `proposed`, "conductor not verified" |
+| R70 | 18 | Option A or B, never both; thermal compressor must not repeat Re(T) | MET | exclusive output modes; heating changes only Re(T) in the circuit; D14 for the HF-roll-off hazard |
+| R71 | 18/27 | Hybrid factorisation H G*/(\|G\|^2 + lambda) with regularisation | HW | needs measured H |
+| R72 | 19 | Internal volume not from the external box; mic frame; IR conventions; preserve absolute gain | PARTIAL | path difference assumed; mic position normalised; IR loaded with `Normalise::yes` (D13) |
+| R73 | 20 | Layered architecture | MET | `CD57Engine`/`AmpCircuit`/`Network`/`Acoustic`/plugin |
+| R74 | 20 | High-accuracy offline solve for identification and a bounded realtime solver | PARTIAL | one solver; the "reference" is the same code at higher oversampling |
+| R75 | 21 | MNA with topology in a readable versioned netlist | MET | `data/netlist/cd57_nominal.net` (`.rev 0.1.0`) |
+| R76 | 21 | Compare integration methods and step sizes to a high-accuracy reference | PARTIAL | step-size dependence measured by me (D15, `p11`); BE vs trapezoid never compared; reference is itself trapezoidal |
+| R77 | 21 | Newton with predictor, damping/line search, fallback, recorded statistics, no undetected unconverged return | PARTIAL | all present; acceptance is a step test (D7) |
+| R78 | 21 | KCL residuals, DC equilibrium, capacitor charge, power flow | PARTIAL | KCL and DC yes (stock only); RC accuracy 3.3e-6 V and LC energy 0.9999-1.0000 pass in my `p23/p26`; no in-suite energy/charge test |
+| R79 | 21 | Same output for any block size | MET | D4 |
+| R80 | 21 | Full vs partitioned solves at control extremes and heavy grid current | MISSING | no partitioned solve exists; extremes covered by kernel-vs-generic only (identical, 0 guarded pivots, 7 states) |
+| R81 | 21 | Cached factorisations only after validity under parameter changes | MET | refactorised every Newton iteration; no pivoting but conditioning verified at extremes (`p23`) |
+| R82 | 22 | No partition that silently delays a coupling by one sample | MET | single simultaneous solve; sources, speaker and acoustic input at the same step (read) |
+| R83 | 22 | Record provenance/licence of external code, tube models, IRs | PARTIAL | README licensing section; **no LICENSE file** (README says to choose one); external anchor numbers not tagged (D5/D11) |
+| R84 | 23 | Support 44.1/48/96 kHz | MET | D8 (+192 kHz): spread 0.12 dB |
+| R85 | 23 | High-accuracy reference at a higher rate; compare several oversampling factors | MISSING | no reference render in the repo; I produced one (`p1`, `p11`): D1 |
+| R86 | 23 | Physical time constants in seconds; coefficients regenerated per rate | MET | `Network::build(h)`; 44.1/48/96/192 agree |
+| R87 | 23 | Resampler ripple, transition width, stopband; latency and phase reported | PARTIAL | transition 0.45-0.55 fs, 80 dB / 60 dB stages in code comment only; latency rounded up (D2) |
+| R88 | 23 | Automation: smooth the physical parameter, preserve endpoints, test slow/abrupt at silence and signal; smoothing time in the product spec | PARTIAL | smoothing 20 ms in the pot-fraction domain, endpoint snap 1e-5 (read); no clicks or zipper (`p10`); the 20 ms figure is in code, not the spec |
+| R89 | 23 | No allocation/locks/unbounded loops in the callback; preallocate | MISSING | D9, D7 |
+| R90 | 23 | Handle denormals, invalid samples, nonfinite solver output | PARTIAL | plugin `ScopedNoDenormals`, panic counter; no denormal slowdown in 30 s silence after a burst (`p23`); NaN path costs 56 ms and mutes a block (D7) |
+| R91 | 23 | Measure worst-case and high-percentile time under drive and automation | MISSING | only "typical playing" CPU; D12 |
+| R92 | 23 | Preset serialisation, sample-rate change, bypass, reset, latency; state of a preset change documented | PARTIAL | APVTS XML, rebuild at `prepareToPlay`, hard bypass, latency reported (rounded); transfer/reset semantics undocumented, OS change resets (D13) |
+| R93 | 24 | Physical volts/amps inside; digital conversions at explicit boundaries | MET | K_in/K_out; worked example reproduced |
+| R94 | 24 | Distinct peak/RMS/p-p conventions | MET | naming in code and report |
+| R95 | 24/25 | Source impedance, converter response, reference channel, raw samples | HW | |
+| R96 | 25 | Capture programme (repeatability, DC/passive, 4 input modes, 27 control combos, 324 captures, transients, loads, acoustic, held-out) | HW (data) / MISSING (software harness) | no tool renders the model over the capture matrix (27 x 4 x 3 conditions) as a regression/reference dataset, although this is possible without hardware (Sec. 29 "can start immediately") |
+| R97 | 26 | Metric definitions (NRMSE, ESR, fixed onset definition, group delay after fixed-delay removal) | MISSING | no NRMSE/ESR code, no clipping-onset definition, no phase/group-delay report |
+| R98 | 26 | Clean response, onset, harmonics, IMD, burst envelope, recovery, held-out NRMSE vs hardware | HW | listed as NOT EVALUATED in the report (correct) |
+| R99 | 26 | Aliases below -80 dBFS for a documented stimulus | **FAIL** | -39 / -58 / -72 dBFS at 2x / 4x / 8x (3.1 kHz, 60 mV pk), D1 |
+| R100 | 26 | Runtime integrity: no non-finite samples, unbounded states, dropouts, hidden solver failures | PARTIAL | 10-minute heavy-drive run clean (`p14`: 0 failures, 0 panics, rails and coil bounded); failures inside the plugin's own ranges, dropouts at 8x/worst case (D7, D12) |
+| R101 | 26 | No per-clip gain refitting | MET | none |
+| R102 | 26 | Diagnostic views: spectra, harmonics vs drive, IMD, residuals, envelopes, rail/cathode trajectories, impedance magnitude/phase | PARTIAL | harmonics vs drive and an IMD line only; no plots, no trajectories, no impedance curves |
+| R103 | 26 | Blind level-matched listening | HW | |
+| R104 | 27 | Eight acceptance experiments | PARTIAL | 8 (numerical) partly; 1-7 HW; none pre-registered |
+| R105 | 27 | Avoid duplication traps (amp-to-mic after modelled amp, second impedance network, repeated thermal effect, repeated IR content) | MET | exclusive acoustic modes; single in-loop speaker; D14 hazard only |
+| R106 | 28 | Unknowns as null/unknown or assumed with sensitivity interval; generic substitutions named | PARTIAL | intervals present (24 assumed, 4 unknown); no sensitivity analysis (D6) |
+| R107 | 29 | Milestones A-H need named evidence | PARTIAL | C partly (independent re-implementation exists only in this audit); G partial (D9, D12, D13); A, D-F, H HW |
+| R108 | 29 | Do not freeze BOM, claim an OEM speaker model, assign a saturation law, certify 1:1 acoustics | PARTIAL | BOM labelled nominal, no 1:1 claim anywhere; saturation law assigned (D16) |
+| R109 | 30 | Machine-readable manifest with provenance; fail clearly on missing mandatory fields or require an explicit provisional profile | PARTIAL | explicit `profile` enforced; `calibration` block unchecked; a rejected manifest falls back to compiled defaults and is reported rather than failing; 14/55 entries consumed (D11) |
+| R110 | 30 | Minimum capture metadata, raw and processed stored separately | MISSING | no schema (cannot be filled without HW) |
+| R111 | 30 | Engineering package: verified schematic, netlist, component register, source catalogue, calibration files, plots, build instructions, validation reports | PARTIAL | netlist, `NETLIST.md`, build docs, report yes; no source catalogue, calibration files or plots |
+| R112 | 31 | Charge/flux-form residual, consistent algebraic constraints | MET | trapezoid companions equivalent for linear storage; winding flux state explicit |
+| R113 | 31 | Linear stamps with terminal orientation; device currents sum to zero; analytic Jacobian incl. moving cathode/screen | MET | `p12`: 3.1e-5 over 38 states; KCL 5.7e-7 A |
+| R114 | 31 | Finite-difference Jacobian check in a development harness | PARTIAL | function exists, never run by any test (D11) |
+| R115 | 31 | Skeleton: validate provenance, connection graph per jack state, allocate everything, DC solve, record initial state, per-step residual/iterations, defined fallback, terminal V and I | PARTIAL | all but: allocation (D9), recorded initial state, per-step residual, terminal current (D10), fallback "how often permitted" |
+| R116 | 31 | Energy checks on isolated elements; passive load must not generate energy | PARTIAL | RC/LC pass in my probes; none in the suite |
+| R117 | 33 | Handoff questions answered honestly; result described as documented approximation | MET | README/report wording consistent with the dossier |
 
-`TODO-AUDIT` (next checkpoint).
+---
+
+## 4. Requirements that are impossible without hardware measurements (not omissions)
+
+These need a physical unit, a measurement rig or data the dossier states does not exist publicly; they must not be read as defects:
+
+1. Serial/revision/market/tube/speaker identity of a specimen (R03, R04); the modern as-built schematic and revision (Sec. 04, 28).
+2. Measured pot resistance-versus-angle maps and total resistances (Sec. 08, 28).
+3. Installed tube curves, specimen mismatch, grid-current onset and screen partition of the actual 6V6 pair (Sec. 07, 15, 16, 28).
+4. Supply- and output-transformer parameters: ratio, DCR, magnetising and leakage inductance, loss, saturation (Sec. 12, 28).
+5. OEM speaker complex impedance, Thiele-Small and large-signal Bl(x), Kms(x), L(x), thermal parameters (Sec. 17, 18, 28).
+6. Cabinet internal geometry, microphone grid, room chain, IRs, directivity (Sec. 19, 28), and therefore the linear acoustic identity and its regularised factorisation (Sec. 27 experiment 4).
+7. Calibration of the reamp/interface chain: K_in, K_out, source impedance, fixed delay (Sec. 24).
+8. Every Sec. 26 comparison against the amplifier: clean response within 0.5 dB, onset within 0.5 dB, harmonics within 1 dB, IMD within 2 dB, burst 5 %, recovery 10 %, held-out NRMSE <= 5 %, blind listening.
+9. Sec. 27 experiments 1-3 and 5-7 and the whole capture programme (Sec. 25), the repeatability floor, and the held-out generalisation test.
+10. Milestones A, D, E, F, H of Sec. 29; the Sec. 33 "verified netlist / controls calibrated / accuracy independently tested" answers.
+11. Component tolerance statistics (Sec. 13): only a sensitivity study around an unverified nominal is possible without a specimen.
+
+What *is* possible without hardware and is therefore a genuine omission when missing: the items marked MISSING or PARTIAL in Section 3 whose evidence column cites a defect (D1-D16), notably the reference-rate comparison, the metric implementations (NRMSE/ESR/onset/group delay), the capture-matrix reference render, per-valve conduction reporting, terminal-current output, and the in-suite Jacobian/energy/charge tests.
+
+---
+
+## 5. Independent re-implementation used for Milestone C (software versus software)
+
+`/tmp/claude-0/audit/probes/p22_indep.py` (numpy/scipy; not in the repo): own netlist parser (value suffixes, evidence tags), own MNA stamps, own Koren/pentode laws taken from `scripts/fit_tubes.py` and the fitted constants, own DC solver (`scipy.optimize.root`) and own complex AC solve; B+1 held at the C++ value, rectifier omitted.
+Configuration: Instrument 1, vol 0.5, mic 0, tone 0.7, 8 ohm dummy load, supply caps x1000 (the validation's own condition).
+
+* DC: worst node difference 0.23 V on rails (b2/b3, the C++ state is not fully settled with 16 mF reservoirs), 0.1 V on preamp plates, <= 0.02 V on cathodes; residual 8e-12 A.
+* AC (100 Hz, 1 kHz, 5 kHz; nodes b_g, p1b, m, p2a, p2b, kcy, g3, p3, sp): worst **0.0025 dB and 0.003 deg**.
+* Conclusion: parser, stamps, units (Meg/k/u/n/p), transformer winding convention and the Koren implementation in `Devices.h` agree with an independent implementation of the same netlist and fit constants. This does **not** validate the netlist against the real amplifier (only against Fig. 7, which I checked by eye on enlarged crops) nor the fit constants against hardware.
