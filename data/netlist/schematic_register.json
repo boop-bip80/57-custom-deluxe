@@ -1,0 +1,201 @@
+{
+  "schema": "cd57-schematic-register/1",
+  "title": "Independent transcription of dossier Fig. 7 (Rob Robinette annotated Fender 5E3 schematic)",
+  "source": {
+    "figure": "dossier Fig. 7, image f-010-008.png, 1464x899 px (coordinates 'loc' below are approximate pixel positions in that image)",
+    "secondary_figure": "dossier Fig. 8 (5E3 wiring layout, f-026-009.png) used only to resolve jack-switch wiring and to cross-check printed ratings",
+    "prose_cross_checked": "dossier Sec. 02, 05-11, 14",
+    "evidence": "HISTORICAL (original 5E3 drawing; not an authenticated modern PR 728 schematic, dossier Sec. 05 and 14)",
+    "independence": "Written before the repository netlist (data/netlist/cd57_nominal.net), docs/NETLIST.md and src/dsp/ were opened. The 'netlist_mapping' section at the end was added afterwards and is the only part that refers to the netlist."
+  },
+  "conventions": {
+    "units": "ohm, farad, volt, watt; 'value' is the nominal printed number converted to SI",
+    "printed": "the label exactly as it is lettered on the drawing; the drawing prints capacitors as 'uF-working_volts' without units and resistors in ohms (K = kilo, MEG = mega)",
+    "nets": "every electrical node is named once in 'nets'; all ground symbols are one net GND (chassis); a wire that is drawn straight between two parts is one net",
+    "ratings": "voltage/power ratings are recorded but are not electrical model parameters",
+    "jacks": "a jack has a tip lug and a switch lug; with no plug inserted the switch lug is closed to the tip lug (normally-closed contact), inserting a plug opens it and puts the plug tip on the tip lug (see 'ambiguities' A1)"
+  },
+  "nets": {
+    "GND": "chassis ground: every ground symbol, OT secondary cold end, HV winding centre tap, safety ground, speaker return",
+    "BH_A": "Bright Hi node: Bright-Hi jack tip lug, 1 MEG input resistor top, upper 68k top, wire to Bright-Lo jack switch lug",
+    "BL_L": "Bright Lo node: Bright-Lo jack tip lug, lower 68k bottom",
+    "V1B_G": "V1B grid node: between the two Bright 68k grid stoppers, to V1B grid",
+    "V1B_P": "V1B plate (also top of the Bright 100k load, left plate of the Bright coupling cap)",
+    "V1B_C": "right plate of the Bright .1-400 coupling cap = Bright volume pot wiper = Bright cap (.0005) top",
+    "NH_A": "Normal Hi node (same structure as BH_A)",
+    "NL_L": "Normal Lo node (same structure as BL_L)",
+    "V1A_G": "V1A grid node between the two Normal 68k grid stoppers, to V1A grid",
+    "V1A_P": "V1A plate (also bottom of the Normal 100k load, left plate of the Normal coupling cap)",
+    "V1A_C": "right plate of the Normal .1-400 coupling cap = Normal volume pot wiper",
+    "K1": "V1 shared cathode (both V1 cathodes tied together; 820 ohm and 25 uF to ground)",
+    "TONE_T": "tone pot end that connects to the .0005 Bright cap",
+    "TONE_B": "tone pot end that connects to the .005 tone cap",
+    "MIX": "common mix node: Bright volume pot bottom end, Normal volume pot top end, tone pot wiper, V2A grid",
+    "V2A_P": "V2A plate (100k load, left plate of the .02 coupling cap)",
+    "V2A_K": "V2A cathode (1500 ohm and 25 uF to ground)",
+    "V2B_G": "V2B grid (right plate of the .02 coupling cap, top of the 1 MEG grid leak)",
+    "V2B_P": "V2B plate = 'Inverted Output' (56K plate load, left plate of the inverted .1-400 cap)",
+    "V2B_K": "V2B cathode = 'Non-Inverted Output' (top of the 1500 cathodyne cathode resistor, left plate of the non-inverted .1-200 cap)",
+    "V2B_T": "cathodyne tail node: bottom of the 1500 cathode resistor, bottom of the 1 MEG grid leak, top of the 56K 'Tail Load Resistor'",
+    "INV_G3": "right plate of the inverted .1-400 cap = top of the V3 220K grid leak = input of the V3 1500 grid stopper",
+    "V3_G": "V3 control grid (after the 1500 grid stopper)",
+    "NON_G4": "right plate of the non-inverted .1-200 cap = top of the V4 220K grid leak = input of the V4 1500 grid stopper",
+    "V4_G": "V4 control grid (after the 1500 grid stopper)",
+    "K3": "'Bias Voltage' node: V3 cathode and V4 cathode tied together; 250 ohm 5W resistor and 25 uF to ground",
+    "OT_PA": "V3 plate = top end of the output-transformer primary",
+    "OT_PB": "V4 plate = bottom end of the output-transformer primary",
+    "B+1": "first filter node: rectifier DC output ('HT or B+ High Voltage DC'), OT primary centre tap, first 16-450 filter cap, 5000 ohm dropping resistor (rectifier side)",
+    "B+2": "after the 5000 ohm resistor: second 16-450 filter cap, both 6V6 screens, 22K dropping resistor (rectifier side)",
+    "B+3": "after the 22K resistor ('High Voltage' bus): third 16-450 filter cap, both V1 100k loads, V2A 100k load, V2B 56K plate load",
+    "SPK_HOT": "output-transformer secondary hot end = tip lugs of the Speaker jack and the Extra Speaker jack = speaker voice-coil hot lead",
+    "RECT_PA": "5Y3GT plate 1 = top end of the HV winding",
+    "RECT_PB": "5Y3GT plate 2 = bottom end of the HV winding",
+    "RECT_F": "5Y3GT filament/cathode lead that goes to the bottom end of the 5V AC rectifier heater winding",
+    "MAINS_HOT": "narrow prong, black wire, 'Hot'",
+    "MAINS_NEUT": "wide prong, white wire, 'Neutral'",
+    "PRI_A": "power-transformer primary top end (after the AC switch)",
+    "PRI_B": "power-transformer primary bottom end (after the fuse)",
+    "HEATER_6V3_A": "6.3 V winding lead (drawn as an arrow to 'all 6.3 volt filaments and pilot lite'; nothing else is drawn)",
+    "HEATER_6V3_B": "6.3 V winding lead (as above)"
+  },
+  "resistors": [
+    {"id": "R_BH_IN",     "function": "Bright Hi input (grid-leak) resistor",         "printed": "1 MEG",  "value": 1000000, "nets": ["BH_A", "GND"],   "loc": [122, 190]},
+    {"id": "R_BH_STOP_H", "function": "Bright upper grid stopper (Hi side)",          "printed": "68k",    "value": 68000,   "nets": ["BH_A", "V1B_G"], "loc": [160, 175]},
+    {"id": "R_BH_STOP_L", "function": "Bright lower grid stopper (Lo side)",          "printed": "68k",    "value": 68000,   "nets": ["BL_L", "V1B_G"], "loc": [160, 265]},
+    {"id": "R_NH_IN",     "function": "Normal Hi input (grid-leak) resistor",         "printed": "1 MEG",  "value": 1000000, "nets": ["NH_A", "GND"],   "loc": [122, 395]},
+    {"id": "R_NH_STOP_H", "function": "Normal upper grid stopper (Hi side)",          "printed": "68k",    "value": 68000,   "nets": ["NH_A", "V1A_G"], "loc": [160, 385]},
+    {"id": "R_NH_STOP_L", "function": "Normal lower grid stopper (Lo side)",          "printed": "68k",    "value": 68000,   "nets": ["NL_L", "V1A_G"], "loc": [160, 470]},
+    {"id": "R_V1B_LOAD",  "function": "V1B plate load resistor",                      "printed": "100K",   "value": 100000,  "nets": ["B+3", "V1B_P"],  "loc": [330, 265]},
+    {"id": "R_V1A_LOAD",  "function": "V1A plate load resistor",                      "printed": "100K",   "value": 100000,  "nets": ["B+3", "V1A_P"],  "loc": [330, 370]},
+    {"id": "R_V1_K",      "function": "V1 shared cathode resistor",                   "printed": "820",    "value": 820,     "nets": ["K1", "GND"],     "loc": [238, 310]},
+    {"id": "R_V2A_LOAD",  "function": "V2A plate load resistor",                      "printed": "100 K",  "value": 100000,  "nets": ["B+3", "V2A_P"],  "loc": [632, 395]},
+    {"id": "R_V2A_K",     "function": "V2A cathode resistor",                         "printed": "1500",   "value": 1500,    "nets": ["V2A_K", "GND"],  "loc": [578, 410]},
+    {"id": "R_V2B_PLATE", "function": "cathodyne plate load resistor",                "printed": "56 K",   "value": 56000,   "nets": ["B+3", "V2B_P"],  "loc": [826, 335]},
+    {"id": "R_V2B_K",     "function": "cathodyne cathode (bias) resistor",            "printed": "1500",   "value": 1500,    "nets": ["V2B_K", "V2B_T"],"loc": [745, 395]},
+    {"id": "R_V2B_TAIL",  "function": "cathodyne 'Tail Load Resistor'",               "printed": "56 K",   "value": 56000,   "nets": ["V2B_T", "GND"],  "loc": [745, 490]},
+    {"id": "R_V2B_GL",    "function": "cathodyne grid leak (returns to the tail node, bootstrapped)", "printed": "1 MEG", "value": 1000000, "nets": ["V2B_G", "V2B_T"], "loc": [705, 395]},
+    {"id": "R_V3_STOP",   "function": "V3 grid stopper",                              "printed": "1500",   "value": 1500,    "nets": ["INV_G3", "V3_G"], "loc": [955, 270]},
+    {"id": "R_V4_STOP",   "function": "V4 grid stopper",                              "printed": "1500",   "value": 1500,    "nets": ["NON_G4", "V4_G"], "loc": [955, 450]},
+    {"id": "R_V3_GL",     "function": "V3 grid leak (returns to ground, not to the cathode)", "printed": "220K", "value": 220000, "nets": ["INV_G3", "GND"], "loc": [887, 320]},
+    {"id": "R_V4_GL",     "function": "V4 grid leak (returns to ground, not to the cathode)", "printed": "220K", "value": 220000, "nets": ["NON_G4", "GND"], "loc": [910, 410]},
+    {"id": "R_OUT_K",     "function": "output shared cathode (bias) resistor",        "printed": "250-5W", "value": 250,     "rating_W": 5, "nets": ["K3", "GND"], "loc": [990, 380]},
+    {"id": "R_DROP1",     "function": "voltage dropping resistor B+1 to B+2",         "printed": "5000",   "value": 5000,    "nets": ["B+1", "B+2"],    "loc": [1135, 562]},
+    {"id": "R_DROP2",     "function": "dropping resistor B+2 to B+3",                 "printed": "22 K",   "value": 22000,   "nets": ["B+2", "B+3"],    "loc": [955, 570]}
+  ],
+  "capacitors": [
+    {"id": "C_V1B_CPL",   "function": "V1B plate coupling cap",                       "printed": ".1-400",  "value": 1.0e-7,  "rating_V": 400, "nets": ["V1B_P", "V1B_C"],  "loc": [395, 205]},
+    {"id": "C_V1A_CPL",   "function": "V1A plate coupling cap",                       "printed": ".1-400",  "value": 1.0e-7,  "rating_V": 400, "nets": ["V1A_P", "V1A_C"],  "loc": [395, 445]},
+    {"id": "C_BRIGHT",    "function": "Bright cap (drawing prints no unit; uF implied)", "printed": ".0005", "value": 5.0e-10, "nets": ["V1B_C", "TONE_T"], "loc": [437, 245]},
+    {"id": "C_TONE",      "function": "tone cap to ground (drawing prints no unit; uF implied)", "printed": ".005", "value": 5.0e-9, "nets": ["TONE_B", "GND"], "loc": [437, 360]},
+    {"id": "C_V1_K",      "function": "V1 cathode bypass cap",                        "printed": "25-15",   "value": 2.5e-5,  "rating_V": 15, "rating_note": "second figure read as 15; Fig. 8 prints 25 VOLTS (ambiguity A5)", "nets": ["K1", "GND"], "loc": [200, 318]},
+    {"id": "C_V2A_K",     "function": "V2A cathode bypass cap",                       "printed": "25-25",   "value": 2.5e-5,  "rating_V": 25, "nets": ["V2A_K", "GND"],    "loc": [545, 410]},
+    {"id": "C_V2_CPL",    "function": "V2A to V2B coupling cap",                      "printed": ".02-400", "value": 2.0e-8,  "rating_V": 400, "nets": ["V2A_P", "V2B_G"],  "loc": [680, 293]},
+    {"id": "C_INV_CPL",   "function": "inverted-output coupling cap to V3",           "printed": ".1-400",  "value": 1.0e-7,  "rating_V": 400, "nets": ["V2B_P", "INV_G3"], "loc": [865, 275]},
+    {"id": "C_NON_CPL",   "function": "non-inverted-output coupling cap to V4",       "printed": ".1-200",  "value": 1.0e-7,  "rating_V": 200, "nets": ["V2B_K", "NON_G4"], "loc": [858, 470]},
+    {"id": "C_OUT_K",     "function": "output cathode bypass cap",                    "printed": "25-25",   "value": 2.5e-5,  "rating_V": 25, "nets": ["K3", "GND"],       "loc": [968, 325]},
+    {"id": "C_FILT1",     "function": "filter cap at B+1 (reservoir)",                "printed": "16-450",  "value": 1.6e-5,  "rating_V": 450, "nets": ["B+1", "GND"],      "loc": [1180, 600]},
+    {"id": "C_FILT2",     "function": "filter cap at B+2",                            "printed": "16-450",  "value": 1.6e-5,  "rating_V": 450, "nets": ["B+2", "GND"],      "loc": [1090, 600]},
+    {"id": "C_FILT3",     "function": "filter cap at B+3",                            "printed": "16-450",  "value": 1.6e-5,  "rating_V": 450, "nets": ["B+3", "GND"],      "loc": [822, 600]}
+  ],
+  "potentiometers": [
+    {"id": "P_VOL_B", "function": "Volume Pot Bright",   "printed": "1 MEG", "value": 1000000, "end_a": "GND",    "end_b": "MIX",    "wiper": "V1B_C", "note": "top track end to ground symbol, bottom track end to the mix node; wiper fed from the Bright coupling cap", "loc": [480, 200]},
+    {"id": "P_VOL_N", "function": "Volume Pot Normal",   "printed": "1 MEG", "value": 1000000, "end_a": "MIX",    "end_b": "GND",    "wiper": "V1A_C", "note": "top track end to the mix node, bottom track end to ground; wiper fed from the Normal coupling cap", "loc": [480, 440]},
+    {"id": "P_TONE",  "function": "Tone Pot",            "printed": "1 MEG", "value": 1000000, "end_a": "TONE_T", "end_b": "TONE_B", "wiper": "MIX",   "note": "top end via .0005 to the Bright wiper node, bottom end via .005 to ground, wiper on the mix node (neither end is grounded directly)", "loc": [437, 300]}
+  ],
+  "tubes": [
+    {"id": "V1B", "type": "12AY7", "envelope": "V1", "role": "Bright preamp triode (upper half of the V1 envelope)", "electrodes": {"plate": "V1B_P", "grid": "V1B_G", "cathode": "K1"}, "loc": [270, 215]},
+    {"id": "V1A", "type": "12AY7", "envelope": "V1", "role": "Normal preamp triode (lower half of the V1 envelope)", "electrodes": {"plate": "V1A_P", "grid": "V1A_G", "cathode": "K1"}, "loc": [270, 440]},
+    {"id": "V2A", "type": "12AX7", "envelope": "V2", "role": "second voltage-gain stage",                              "electrodes": {"plate": "V2A_P", "grid": "MIX",    "cathode": "V2A_K"}, "loc": [590, 300]},
+    {"id": "V2B", "type": "12AX7", "envelope": "V2", "role": "phase inverter (cathodyne)",                             "electrodes": {"plate": "V2B_P", "grid": "V2B_G", "cathode": "V2B_K"}, "loc": [745, 290]},
+    {"id": "V3",  "type": "6V6GT", "envelope": "V3", "role": "push-pull power tube, plate to the OT primary top end", "electrodes": {"plate": "OT_PA", "screen": "B+2", "grid": "V3_G", "cathode": "K3"}, "note": "drawn with plate, screen, control grid, cathode only (no beam plates / suppressor drawn)", "loc": [1048, 255]},
+    {"id": "V4",  "type": "6V6GT", "envelope": "V4", "role": "push-pull power tube, plate to the OT primary bottom end", "electrodes": {"plate": "OT_PB", "screen": "B+2", "grid": "V4_G", "cathode": "K3"}, "note": "drawn upside down relative to V3", "loc": [1048, 455]},
+    {"id": "V5",  "type": "5Y3GT", "envelope": "V5", "role": "full-wave rectifier", "electrodes": {"plate_1": "RECT_PA", "plate_2": "RECT_PB", "cathode_dc": "B+1", "filament_other": "RECT_F"}, "note": "both filament/cathode leads are drawn; the DC output lead goes to B+1 (HT), the other lead goes to the 5V winding", "loc": [1090, 745]}
+  ],
+  "transformers": [
+    {"id": "OT", "function": "Output Transformer", "loc": [1220, 380],
+     "windings": [
+       {"name": "primary", "ends": ["OT_PA", "OT_PB"], "centre_tap": "B+1", "note": "plate-to-plate impedance and turns ratio are NOT printed"},
+       {"name": "secondary", "ends": ["SPK_HOT", "GND"], "note": "lower end to ground, upper end to the speaker jacks; drawn as a bracket '>' with grey signal-path lines; two core lines drawn; no data printed"}
+     ]},
+    {"id": "PT", "function": "Power Transformer", "loc": [910, 700],
+     "windings": [
+       {"name": "primary", "ends": ["PRI_A", "PRI_B"], "note": "voltage tap/mains voltage not printed"},
+       {"name": "HV secondary", "ends": ["RECT_PA", "RECT_PB"], "centre_tap": "GND", "note": "label 'CT' to a ground symbol; AC voltage NOT printed"},
+       {"name": "5V AC Rectifier Heater", "ends": ["B+1", "RECT_F"], "note": "printed '5V AC Rectifier Heater'; upper end joins the HT line (the rectifier DC output), lower end goes to the second rectifier filament lead"},
+       {"name": "6.3 V winding", "ends": ["HEATER_6V3_A", "HEATER_6V3_B"], "note": "two arrows 'To ALL 6.3 VOLT FILAMENTS AND PILOT LITE'; no connection to ground, centre tap or any other part is drawn"}
+     ]}
+  ],
+  "jacks": [
+    {"id": "J_BH", "dossier_name": "Instrument 1 (Bright Hi)", "printed": "Bright HI Input Jack", "tip": "BH_A", "switch": "GND",  "switch_closed_when_unplugged": true, "drawn_state": "plug inserted (black plug tip drawn at the V contact)", "loc": [45, 150]},
+    {"id": "J_BL", "dossier_name": "Instrument 2 (Bright Lo)", "printed": "Bright Lo",           "tip": "BL_L", "switch": "BH_A", "switch_closed_when_unplugged": true, "drawn_state": "no plug", "loc": [45, 290]},
+    {"id": "J_NH", "dossier_name": "Mic 1 (Normal Hi)",        "printed": "Normal Hi",           "tip": "NH_A", "switch": "GND",  "switch_closed_when_unplugged": true, "drawn_state": "no plug", "loc": [45, 345]},
+    {"id": "J_NL", "dossier_name": "Mic 2 (Normal Lo)",        "printed": "Normal Lo",           "tip": "NL_L", "switch": "NH_A", "switch_closed_when_unplugged": true, "drawn_state": "no plug", "loc": [45, 495]},
+    {"id": "J_SPK",  "printed": "Speaker Jack", "tip": "SPK_HOT", "sleeve": "GND", "drawn_state": "speaker plugged (voice-coil leads drawn with arrows onto the jack); the drawing shows no switching contact action", "loc": [1295, 345]},
+    {"id": "J_XSPK", "printed": "EXTRA 8-ohm SPKR.", "tip": "SPK_HOT", "sleeve": "GND", "drawn_state": "no plug", "loc": [1335, 255]}
+  ],
+  "input_plug_states": {
+    "convention": "per channel; H = plug in the Hi jack, L = plug in the Lo jack. The tip lug of a jack is driven by its plug; an empty jack closes its switch lug to its tip lug.",
+    "none":    {"merged_nets": [["BH_A", "GND"], ["BL_L", "BH_A"]], "grid_network": "both 68k to ground, grid leak shorted: silent"},
+    "H_only":  {"source_on": "BH_A", "merged_nets": [["BL_L", "BH_A"]], "grid_network": "68k || 68k = 34k from the source to the grid, 1 MEG to ground at the source (this is the state drawn on Fig. 7); input impedance about 1 MEG (dossier Sec. 02)"},
+    "L_only":  {"source_on": "BL_L", "merged_nets": [["BH_A", "GND"]], "grid_network": "source -> 68k -> grid -> 68k -> ground: half-voltage divider, about 136k input load (dossier Sec. 06 and Sec. 02)"},
+    "H_and_L": {"sources_on": ["BH_A", "BL_L"], "merged_nets": [], "grid_network": "each source reaches the grid through its own 68k; the 1 MEG stays on the Hi source node"}
+  },
+  "switches": [
+    {"id": "SW_AC", "function": "AC SWITCH (On-Off), single pole", "printed": "AC SWITCH, On - Off", "nets": ["MAINS_HOT", "PRI_A"], "drawn_state": "open (OFF position drawn)", "loc": [815, 710]}
+  ],
+  "fuses": [
+    {"id": "F1", "function": "mains fuse in the neutral lead", "printed": "2 AMP. FUSE, Slow Blow", "rating_A": 2, "nets": ["MAINS_NEUT", "PRI_B"], "loc": [815, 785]}
+  ],
+  "plug": {"id": "PLUG", "printed": "Power Cord", "hot": {"net": "MAINS_HOT", "label": "Narrow Prong, Black Wire, Hot"}, "neutral": {"net": "MAINS_NEUT", "label": "Wide Prong, White Wire, Neutral"}, "safety_ground": {"net": "GND", "label": "Green Wire -> Chassis Safety Ground"}, "loc": [370, 775]},
+  "speaker": {"id": "SPK", "function": "internal speaker voice coil", "nets": ["SPK_HOT", "GND"], "printed": "(speaker symbol, no value). Annotation: 'Typical: 8 Ohms, 18 Watts, 12 Vrms, 34 Vpeak-to-peak, 1.5 Amps'; extra jack labelled 'EXTRA 8-ohm SPKR.'", "loc": [1420, 375]},
+  "annotations_not_components": {
+    "input_level": "'Signal In From Guitar Is Very Low Voltage AC. Stratocaster Single Coil. Low E String Pluck = 0.05 Vrms or 50 milli volts rms'",
+    "output_level": "'Signal Out To Speaker Is Low Voltage High Current AC. Typical: 8 Ohms 18 Watts 12 Vrms 34 Vpeak-to-peak 1.5 Amps'",
+    "titles": "'FENDER DELUXE SCHEMATIC MODEL 5E3', '1957 Tweed Deluxe', 'F-EE', 'Annotated by Rob Robinette'",
+    "labels": "'Bias Voltage' on the output cathode node, 'High Voltage' on the B+3 bus, 'HT or B+ High Voltage DC' on the rectifier output"
+  },
+  "ambiguities": [
+    {"id": "A1", "where": "all four input jacks", "drawing": "Only the Bright-Hi jack is drawn with a plug (the Fig. 7 state). A thick arrow wire runs from the Hi node (top line) down to the Lo jack's lead/bottom line, and a thin arrow wire runs from the 1 MEG's grounded end up to the top line. Neither wire has a contact symbol.", "resolution": "The thin arrow wire is the Hi jack's switch lug wired to ground; the thick arrow wire is the Lo jack's switch lug wired to the Hi node. Evidence: Fig. 8 draws exactly these two wires as lug connections (Fig. 8 'Bright Hi': ground arrow to jack 1; J1 node wired to jack 2 by an arrow), and the dossier Sec. 06 describes 34k (Hi alone), half-voltage divider with ~136k (Lo alone), which only these contacts produce. Without that reading the 1 MEG would be short-circuited by the thin wire. The normally-closed action is the standard switched-jack behaviour and is DERIVED, not drawn.", "confidence": "high for the Hi-only state (drawn), medium-high for the other three states (derived)"},
+    {"id": "A2", "where": "Bright V1B grid node", "drawing": "a thick black block sits on the grid wire at the top of the lower 68k", "resolution": "heavy junction mark; the lower 68k top joins the grid node (the Normal channel shows an ordinary dot at the same place)", "confidence": "high"},
+    {"id": "A3", "where": "V1A plate wire crossing the B+3 riser", "drawing": "the B+3 vertical wire at x=352 crosses the V1A plate-to-coupling-cap wire without a dot", "resolution": "crossing, no connection (otherwise V1A plate would be tied to B+3); the B+3 feed enters the plate-load pair at the dot between the two 100k resistors", "confidence": "high"},
+    {"id": "A4", "where": "Bright cap top", "drawing": "the .0005 cap hangs from a thick vertical line that starts on the Bright coupling-cap output wire next to the volume wiper arrow", "resolution": "the cap top is the volume-pot wiper node (V1B_C); this matches dossier Sec. 08 ('through 500 pF to the Bright channel's signal/volume wiper')", "confidence": "high"},
+    {"id": "A5", "where": "V1 cathode bypass label", "drawing": "reads '25-15' on Fig. 7 (the other two 25 uF caps read '25-25'); Fig. 8 prints '25 MFD. 25 VOLTS' for the same cap", "resolution": "capacitance 25 uF is unambiguous; the working-voltage digit is recorded as 15 (as read) and flagged. It does not enter the electrical model.", "confidence": "capacitance high, voltage rating about 70 percent"},
+    {"id": "A6", "where": "Bright cap and tone cap units", "drawing": "'.0005' and '.005' with no unit", "resolution": "uF (same convention as '.1-400' and '.02-400'); equal to 500 pF and 5 nF, matching dossier Sec. 08 and 14", "confidence": "high"},
+    {"id": "A7", "where": "OT secondary, speaker jack, extra jack", "drawing": "the secondary is a bracket; the upper end goes to a dot with a wire up to the Extra jack and right to the Speaker jack V contact; the lower end goes to a dot on the ground arrow. A second, thick grey V is drawn over the jack as the signal path. Voice-coil leads end in arrows onto the jack and onto the lower ground dot.", "resolution": "upper secondary end = SPK_HOT feeding both jacks in parallel, lower end grounded, internal speaker connected between SPK_HOT and ground, extra jack open. Whether the internal speaker is disconnected when a plug enters the Extra jack is not drawn.", "confidence": "medium-high (topology of the main load), not determinable (jack switching)"},
+    {"id": "A8", "where": "6V6 grid leaks", "drawing": "the two 220K grid leaks end on a line that runs left to a ground symbol and right to the left end of the 250 ohm resistor; the cathode node ('Bias Voltage') is on the right end of the 250 ohm resistor", "resolution": "grid leaks return to ground, not to the cathode node; the 250 ohm 5W resistor and its 25 uF cap sit between the cathode node and ground", "confidence": "high"},
+    {"id": "A9", "where": "6V6 screens", "drawing": "each screen has a wire straight to the vertical B+2 line, no series resistor", "resolution": "screens tie directly to B+2", "confidence": "high"},
+    {"id": "A10", "where": "rectifier cathode and 5V winding", "drawing": "the 5V winding top end meets the HT line at a dot, the winding bottom end goes to the upper filament lead, and the lower filament lead goes to the HT line", "resolution": "the filament is across the 5V winding with the winding's top end tied to the DC output node B+1", "confidence": "high"},
+    {"id": "A11", "where": "polarity of electrolytics", "drawing": "cap symbols for 25-25, 25-15 and 16-450 carry no polarity mark", "resolution": "polarity not transcribed; all electrolytics have one end on ground (cathode bypass, filter caps), so the positive end is the non-ground node", "confidence": "high for orientation (DERIVED)"},
+    {"id": "A12", "where": "all ground symbols", "drawing": "many separate ground symbols, including one for chassis safety ground", "resolution": "treated as one net GND (single chassis ground); the drawing does not distinguish signal and power ground", "confidence": "high"},
+    {"id": "A13", "where": "pot wiper arrows", "drawing": "arrowheads point into the pot track from the connecting wire", "resolution": "arrowhead marks the wiper; its direction carries no electrical meaning", "confidence": "high"}
+  ],
+  "not_on_drawing": [
+    "heater (filament) wiring for V1-V4, heater voltage references, hum-balance or heater centre-tap grounding (only 'To ALL 6.3 VOLT FILAMENTS AND PILOT LITE' arrows)",
+    "pilot lamp (named in the text, no symbol or wiring)",
+    "power-transformer winding voltages (only '5V AC Rectifier Heater' is labelled), turns, DC resistances, primary mains voltage/taps",
+    "output-transformer winding data: primary impedance, turns ratio, resistances, leakage, inductance, core data, secondary taps",
+    "internal speaker impedance symbol value (only the typical-output annotation says 8 ohms and the Extra jack is labelled 8 ohm); no speaker T-S data",
+    "tube pin numbers, electrode capacitances, tube datasheet curves, DC operating voltages and currents",
+    "pot tapers, wiper contact resistance, pot track tolerances",
+    "resistor and capacitor tolerances, capacitor ESR/leakage, electrolytic polarity marks",
+    "standby switch, bleeder resistor, death cap, ground switch (Fig. 8 says 'Death Cap Deleted' and 'Ground Switch Deleted')",
+    "global negative feedback (none drawn), screen resistors (none drawn), cathode or grid protection parts other than the 1500 ohm grid stoppers",
+    "guitar source impedance, cable capacitance",
+    "stray and wiring capacitances, tube-socket and inter-electrode capacitances",
+    "any modern PR 728 production change (Fig. 7 is the 1957 5E3, not an authenticated modern schematic)"
+  ],
+  "dossier_crosscheck": [
+    {"id": "D1", "item": "V2A to V2B coupling capacitor", "drawing": ".02-400 (Fig. 8: .02, 600 V)", "dossier": "0.022 uF (Sec. 14 table)", "class": "VALUE CONFLICT", "recommendation": "keep 0.022 uF as default (the dossier specification is the more precise number and .022 is the standard value); record 0.02 uF as the drawing alternative (+/-10 percent)"},
+    {"id": "D2", "item": "V1 shared-cathode bypass capacitor working voltage", "drawing": "25-15 on Fig. 7 (25-25 on the other two bypass caps; Fig. 8 prints 25 V)", "dossier": "25 uF, no voltage", "class": "RATING ONLY (not electrical)", "recommendation": "no model change"},
+    {"id": "D3", "item": "output coupling capacitors", "drawing": ".1-400 (inverted) and .1-200 (non-inverted)", "dossier": "Two x 0.1 uF, no voltage", "class": "RATING ONLY (not electrical); asymmetry of the working voltage is on the drawing", "recommendation": "no model change"},
+    {"id": "D4", "item": "output grid stoppers", "drawing": "two x 1500 ohm in series with each 6V6 grid", "dossier": "not listed in the Sec. 14 table (Sec. 14 says additional grid/screen protection parts are deliberately unresolved)", "class": "ON DRAWING, NOT IN DOSSIER TABLE", "recommendation": "keep (HISTORICAL)"},
+    {"id": "D5", "item": "volume, tone pot track values", "drawing": "1 MEG each", "dossier": "1 MOhm nominal each, taper to be established", "class": "CONSISTENT", "recommendation": "none"},
+    {"id": "D6", "item": "bright / tone caps", "drawing": ".0005 / .005 (no unit printed)", "dossier": "500 pF / 0.005 uF", "class": "CONSISTENT (unit convention uF)", "recommendation": "none"},
+    {"id": "D7", "item": "typical output annotation", "drawing": "8 ohm, 18 W, 12 Vrms, 34 Vpp, 1.5 A", "dossier": "12.5 W into 8 ohm, 10.0 Vrms, 1.25 A, 28.28 Vpp (Sec. 02)", "class": "ANNOTATION DIFFERS (original 5E3 typical vs modern published spec; not a component value)", "recommendation": "use the dossier numbers as the modern reference; the 18 W annotation is HISTORICAL context only"},
+    {"id": "D8", "item": "tube types", "drawing": "12AY7, 12AX7, 6V6GT x2, 5Y3GT", "dossier": "12AY7, 12AX7, 2 x 6V6 (manual prints 6V6GC), 5Y3", "class": "ENVELOPE SUFFIX ONLY", "recommendation": "none"},
+    {"id": "D9", "item": "input impedances", "drawing": "derived from the drawn jack/resistor network: Hi alone 1 MEG (34k to the grid); Lo alone 68k+68k = 136k", "dossier": "1 MOhm for 1, 136 kOhm for 2 (Sec. 02, 06)", "class": "CONSISTENT", "recommendation": "none"},
+    {"id": "D10", "item": "mains fuse", "drawing": "2 AMP slow blow, in the neutral lead", "dossier": "F2A L 250 V for 100-120 V markets (Sec. 02)", "class": "CONSISTENT", "recommendation": "none"},
+    {"id": "D11", "item": "supply values", "drawing": "3 x 16-450, 5000 then 22K", "dossier": "Three x 16 uF, 5 kOhm then 22 kOhm", "class": "CONSISTENT (450 V rating only on the drawing)", "recommendation": "none"},
+    {"id": "D12", "item": "all other table rows", "drawing": "68k x4, 1 MEG x2 input, 100K x2 first-stage loads, 820 + 25 uF, .1 x2 channel couplers, 100K / 1500 / 25 uF second stage, 56K plate and 56K tail, 1500 / 1 MEG cathodyne bias and grid reference, 2 x 220K, 250 + 25 uF", "dossier": "same numbers in Sec. 14 and Sec. 08-10 prose", "class": "CONSISTENT", "recommendation": "none"}
+  ]
+}
