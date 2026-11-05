@@ -5,3 +5,4 @@ cmake-build-*/
 .idea/
 *.user
 .DS_Store
+__pycache__/
