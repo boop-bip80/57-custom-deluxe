@@ -103,6 +103,7 @@ public:
     {
         fsInt_ = internalRate;
         theta_ = theta;
+        net_->useKernel = useKernel_;
         net_->build(1.0 / internalRate, theta);
         applyConfig();
         mainsGain_ = mainsTarget_ = target_.power ? 1.0 : 0.0;
@@ -257,6 +258,7 @@ public:
     double powerEnvelope() const { return mainsGain_; }
 
     double dcGuessFrac = 0.86;
+    void setUseKernel(bool b) { useKernel_ = b; }          // validation: compare the generated LU kernel with the generic path
 
 private:
     static int idxOf(const std::vector<std::string>& v, const char* nm) { for (size_t i = 0; i < v.size(); ++i) if (v[i] == nm) return (int)i; return -1; }
@@ -345,6 +347,7 @@ private:
     double gauss_() { return nd_(noiseRng_); }
 
     std::unique_ptr<Network> net_;
+    bool useKernel_ = true;
     double fsInt_ = 96000, theta_ = 0.5, phase_ = 0.0;
     AmpControls target_, cur_;
     double smoothCoef_ = 0.2, mainsGain_ = 1.0, mainsTarget_ = 1.0, emTube_ = 1.0, emRect_ = 1.0;

@@ -42,6 +42,11 @@ if(CD57_BUILD_TOOLS)
     target_link_libraries(cd57_render PRIVATE cd57_core)
     add_executable(cd57_validate tools/cd57_validate.cpp)
     target_link_libraries(cd57_validate PRIVATE cd57_core)
+    # regenerates the unrolled LU kernel after any netlist-topology change:  cmake --build build --target regen_lu_kernel
+    add_executable(cd57_gen_lu tools/gen_lu.cpp)
+    target_link_libraries(cd57_gen_lu PRIVATE cd57_core)
+    add_custom_target(regen_lu_kernel COMMAND cd57_gen_lu ${CD57_NETLIST} ${CMAKE_CURRENT_SOURCE_DIR}/generated/LuKernel.h
+        DEPENDS cd57_gen_lu COMMENT "Regenerating generated/LuKernel.h" VERBATIM)
     enable_testing()
     add_test(NAME dossier_validation COMMAND cd57_validate --quick --report ${CMAKE_CURRENT_BINARY_DIR}/validation_quick.md)
 endif()

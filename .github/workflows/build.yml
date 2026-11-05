@@ -1,0 +1,36 @@
+name: build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxext-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev libcurl4-openssl-dev xvfb
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build plugin (VST3 + Standalone) and tools
+        run: cmake --build build --config Release --parallel 4
+      - name: Validation suite (quick)
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: VST3 host test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a ./build/cd57_host_test_artefacts/Release/cd57_host_test "build/CustomDeluxe57_artefacts/Release/VST3/57 Custom Deluxe.vst3"
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: CustomDeluxe57-${{ runner.os }}
+          path: |
+            build/CustomDeluxe57_artefacts/Release/VST3
+            build/CustomDeluxe57_artefacts/Release/Standalone

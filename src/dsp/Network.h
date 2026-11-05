@@ -26,6 +26,10 @@
 
 #include "Devices.h"
 #include "SparseLU.h"
+#if __has_include("LuKernel.h")
+#include "LuKernel.h"
+#define CD57_HAVE_LU_KERNEL 1
+#endif
 
 namespace cd57 {
 
@@ -89,6 +93,9 @@ public:
     const std::vector<std::string>& nodeNames() const { return nodeNames_; }
     int unknowns() const { return N_; }
     size_t luOps() const { return lu_.opCount(); }
+    bool luSpecialised() const { return lu_.specialised(); }
+    std::string emitLuKernel() const { return lu_.emitKernel(); }
+    bool useKernel = true;
     int luNnz() const { return lu_.nnz(); }
     double tEval = 0, tFactor = 0, tSolve = 0; bool profile = false;
     void (*traceCb)(const Network&, int it, double maxdz, double eta) = nullptr;
@@ -150,6 +157,9 @@ public:
         }
         lu_.init(N_, touches);
         nnz_ = lu_.nnz();
+#ifdef CD57_HAVE_LU_KERNEL
+        if (useKernel) lu_.installKernel(lukernel::kSignature, &lukernel::factor, &lukernel::solve);
+#endif
 
         // slot tables
         auto S = [&](int r, int c) { return (r < 0 || c < 0) ? -1 : lu_.slot(r, c); };

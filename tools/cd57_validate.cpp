@@ -325,6 +325,17 @@ int main(int argc, char** argv)
             }
             check(fin, "abrupt/continuous automation of volume and tone keeps every sample finite");
         }
+        // generated straight-line LU kernel vs the generic sparse LU: must be the same solver (identical outputs)
+        {
+            AmpCircuit a, b; a.loadNetlist(gNetlist); b.loadNetlist(gNetlist); b.setUseKernel(false);
+            a.prepare(96000.0, 0.5); b.prepare(96000.0, 0.5);
+            AmpControls c; c.instVol = 0.7; c.tone = 0.7; c.load = LoadMode::Speaker; a.setControls(c); b.setControls(c); a.applyControls(true); b.applyControls(true);
+            a.initialiseQuiescent(0.1); b.initialiseQuiescent(0.1);
+            double worst = 0;
+            for (int i = 0; i < 6000; ++i) { const double e = 0.08 * std::sin(2 * M_PI * 220.0 * i / 96000.0) * std::min(1.0, i / 500.0); a.tick(e); b.tick(e); worst = std::max(worst, std::fabs(a.vTerminal() - b.vTerminal())); }
+            check(a.network().luSpecialised() && !b.network().luSpecialised(), "generated unrolled LU kernel is installed for this netlist (pattern signature matches)");
+            check(worst < 1e-7, "unrolled LU kernel and generic sparse LU produce the same circuit solution", "max |difference| " + f(worst, 12) + " V over 6000 steps");
+        }
         // solver health on a drive sweep
         {
             Rig r(p); uint64_t steps = 0, fails = 0, subs = 0;
@@ -399,7 +410,7 @@ int main(int argc, char** argv)
         for (int i = 0; i < 4800; ++i) in[i] = (float)(dig * std::sin(2 * M_PI * 1000.0 * i / 48000.0));
         const double cal = r.e.params().inputCalVolts; for (int i = 0; i < 4800; ++i) e += std::pow(in[i] * cal, 2); e = std::sqrt(e / 4800);
         check(std::fabs(e - 0.100) < 2e-3, "the engine's digital-to-jack-voltage conversion reproduces 0.100 V RMS", f(e, 4) + " V");
-        const double Vrated = std::sqrt(12.5 * 8.0); check(std::fabs(Vrated - 10.0) < 1e-9, "derived rated terminal voltage sqrt(P R) = 10.0 V RMS (14.14 V pk)", f(Vrated, 3) + " V; engine output reference 20 V pk = 0 dBFS, rated sine = -3.0 dBFS");
+        const double Vrated = std::sqrt(12.5 * 8.0); check(std::fabs(Vrated - 10.0) < 1e-9, "derived rated terminal voltage sqrt(P R) = 10.0 V RMS (14.14 V pk)", f(Vrated, 3) + " V; plugin default output reference 28.28 V pk = 0 dBFS, so the rated sine = -6.0 dBFS");
     }
 
     // ============================================================================================ not evaluated

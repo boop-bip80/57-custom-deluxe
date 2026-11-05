@@ -10,7 +10,7 @@
  "sample_rate_hz": null,
  "calibration": {
   "volts_per_full_scale_input_sample": 1.0,
-  "output_samples_per_volt": 0.05,
+  "output_samples_per_volt": 0.03536,
   "source_impedance_ohm": 100.0,
   "fixed_delay_samples": "derived: oversampler group delay, reported to the host"
  },
@@ -449,10 +449,10 @@
    "note": "user-adjustable 'Input Cal'; NOT a Fender specification"
   },
   "calibration_output_samples_per_volt": {
-   "value": 0.05,
+   "value": 0.03536,
    "unit": "1/V",
    "status": "proposed",
-   "note": "0 dBFS = 20 V peak at the speaker terminals (rated 12.5 W sine = -3 dBFS)"
+   "note": "0 dBFS = 28.28 V peak at the speaker terminals (rated 12.5 W sine, 14.14 V peak = -6 dBFS)"
   },
   "source_impedance": {
    "value": 100.0,

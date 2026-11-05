@@ -40,7 +40,7 @@ struct EngineParams {
     // plugin I/O calibration
     float inputTrimDb = 0.0f, outputDb = 0.0f;
     float inputCalVolts = 1.0f;          // peak volts at the jack for a 0 dBFS sample
-    float outputRefVolts = 20.0f;        // peak speaker-terminal volts that reads 0 dBFS
+    float outputRefVolts = 28.28f;       // peak speaker-terminal volts that reads 0 dBFS (rated 12.5 W sine = -6 dBFS)
     // supply / valves (stock: 5Y3, 12AY7, 12AX7)
     int market = 0;
     float linePercent = 100.0f;

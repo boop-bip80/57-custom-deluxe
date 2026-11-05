@@ -94,12 +94,12 @@ add("rectifier_5Y3_forward", {"k1_mA_per_V": fits["rectifier_5Y3"]["k1_mA_per_V"
 # ---- calibration (dossier Sec. 24)
 CAL = {
     "volts_per_full_scale_input_sample": 1.0,
-    "output_samples_per_volt": 0.05,
+    "output_samples_per_volt": 0.03536,
     "source_impedance_ohm": 100.0,
     "fixed_delay_samples": "derived: oversampler group delay, reported to the host",
 }
 add("calibration_volts_per_full_scale_input_sample", 1.0, "V", "assumed", None, [0.1, 5.0], note="user-adjustable 'Input Cal'; NOT a Fender specification")
-add("calibration_output_samples_per_volt", 0.05, "1/V", "proposed", None, note="0 dBFS = 20 V peak at the speaker terminals (rated 12.5 W sine = -3 dBFS)")
+add("calibration_output_samples_per_volt", 0.03536, "1/V", "proposed", None, note="0 dBFS = 28.28 V peak at the speaker terminals (rated 12.5 W sine, 14.14 V peak = -6 dBFS)")
 add("source_impedance", 100.0, "ohm", "assumed", None, [0.0, 10000.0], note="line/DI default; pickup+cable model optional")
 
 manifest = {
