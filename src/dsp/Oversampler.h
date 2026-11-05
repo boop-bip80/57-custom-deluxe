@@ -96,6 +96,16 @@ public:
         for (int s = 0; s < n_; ++s) d += double(stages_[s].taps() - 2) / double(1 << (s + 1));   // decimator aligns to the newer sample of each pair
         return d;
     }
+    // exact delay of the up path alone and of the down path alone, in base-rate samples; latency() is their sum.
+    // The mains-phase relation between the signal and the circuit depends on the up-path delay alone, so a
+    // reference comparison needs the split (validate_numerics, section C).
+    double latencyUp() const
+    {
+        double d = 0.0;
+        for (int s = 0; s < n_; ++s) d += 0.5 * double(stages_[s].taps() - 1) / double(1 << (s + 1));
+        return d;
+    }
+    double latencyDown() const { return latency() - latencyUp(); }
     void reset() { for (auto& s : stages_) s.reset(); for (auto& s : stagesDown_) s.reset(); }
 
     // upsample n base samples into n*factor samples

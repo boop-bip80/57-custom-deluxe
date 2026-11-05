@@ -51,7 +51,8 @@ if(CD57_BUILD_TOOLS)
     add_test(NAME dossier_validation COMMAND cd57_validate --quick --report ${CMAKE_CURRENT_BINARY_DIR}/validation_quick.md)
     # --- numerics tests ---
     add_executable(validate_numerics tools/validate_numerics.cpp)
-    target_link_libraries(validate_numerics PRIVATE cd57_core)
+    find_package(Threads REQUIRED)
+    target_link_libraries(validate_numerics PRIVATE cd57_core Threads::Threads)
     add_test(NAME numerics_validation COMMAND validate_numerics --quick --report ${CMAKE_CURRENT_BINARY_DIR}/numerics_quick.md)
 endif()
 
