@@ -1,0 +1,139 @@
+.title Fender '57 Custom Deluxe -- nominal public-source netlist (5E3-family topology)
+.rev 0.1.0
+# ------------------------------------------------------------------------------------------------
+# Readable, versioned netlist kept independent of solver code (dossier Sec. 21).
+# Evidence labels follow dossier Sec. 01:  CONF=confirmed by manufacturer for the modern target,
+# HIST=historical 5E3 value (S03/S05), DER=derived, PROP=proposed engineering choice,
+# ASSUMED=public value not located -> explicit assumption (dossier Sec. 28), DATASHEET=tube datasheet class.
+# This is a DOCUMENTED APPROXIMATION of the modern amp, branch "historical 5E3 + modern nominal":
+# no factory service schematic for the modern unit was authenticated (dossier Sec. 04).
+# Node "0" is chassis ground.  "dyn" elements are driven at runtime from the plugin controls.
+# ------------------------------------------------------------------------------------------------
+
+# ===== Source chain: guitar EMF (Norton at pu) -> series R -> pickup L -> cable C -> selected jack tip
+R Rsrc   pu 0   100   dyn ev=PROP note=source_resistance_(line/DI_mode_default)
+L Lpu    pu tp  1u    dyn ev=PROP note=pickup_inductance_(1uH=ideal_line_mode)
+C Ccab   tp 0   20p   dyn ev=PROP note=cable_capacitance
+R Rsel_b1 tp b_t1 1G  dyn ev=PROP note=plug_selector_Instrument_1
+R Rsel_b2 tp b_t2 1G  dyn ev=PROP note=plug_selector_Instrument_2
+R Rsel_n1 tp n_t1 1G  dyn ev=PROP note=plug_selector_Mic_1
+R Rsel_n2 tp n_t2 1G  dyn ev=PROP note=plug_selector_Mic_2
+# optional patch (jumper) cables between jack tips
+R Rpt_b1b2 b_t1 b_t2 1G dyn ev=PROP
+R Rpt_n1n2 n_t1 n_t2 1G dyn ev=PROP
+R Rpt_b1n1 b_t1 n_t1 1G dyn ev=PROP
+R Rpt_b1n2 b_t1 n_t2 1G dyn ev=PROP
+R Rpt_b2n1 b_t2 n_t1 1G dyn ev=PROP
+R Rpt_b2n2 b_t2 n_t2 1G dyn ev=PROP
+
+# ===== Jack networks (HISTORICAL 5E3 arrangement, S03/S05; modern wiring unverified)
+# Channel B = Instrument (bright) channel: jack 1 = Hi (Instrument 1), jack 2 = Lo (Instrument 2)
+R Rb_a    b_t1 b_g  68k  tol=0.05 ev=HIST src=S03 note=grid_stopper/mixing_resistor
+R Rb_b    b_t2 b_g  68k  tol=0.05 ev=HIST src=S03 note=grid_stopper/mixing_resistor
+R Rb_leak b_t1 0    1Meg tol=0.05 ev=HIST src=S03 note=input_resistor_(grid_leak)
+R Sw_b1   b_t1 0    1G   dyn ev=HIST src=S03 note=jack_1_switch:_grounds_tip_when_unplugged
+R Sw_b2   b_t2 b_t1 1G   dyn ev=HIST src=S03 note=jack_2_switch:_ties_tip_to_jack_1_when_unplugged
+# Channel N = Mic (normal) channel
+R Rn_a    n_t1 n_g  68k  tol=0.05 ev=HIST src=S03
+R Rn_b    n_t2 n_g  68k  tol=0.05 ev=HIST src=S03
+R Rn_leak n_t1 0    1Meg tol=0.05 ev=HIST src=S03
+R Sw_n1   n_t1 0    1G   dyn ev=HIST src=S03
+R Sw_n2   n_t2 n_t1 1G   dyn ev=HIST src=S03
+
+# NOTE: the 6V6 interelectrode capacitances carry th=1 (backward Euler): they resonate with the output-transformer
+# leakage far above Nyquist, and trapezoidal integration would ring there (dossier Sec. 21: 'Trapezoidal integration
+# ... may ring in stiff nonlinear transitions').  The preamp triodes have no inductive neighbour, so they keep the more
+# accurate trapezoidal rule (theta = 0.5): this removed the high-frequency magnitude error vs the AC solution.
+# ===== V1: 12AY7 dual triode, shared cathode (dossier Sec. 07).  V1B = Instrument, V1A = Mic
+TRIODE V1B p1b b_g k1 type=12AY7 ev=CONF src=S01/S08 note=Instrument_(bright)_half
+TRIODE V1A p1n n_g k1 type=12AY7 ev=CONF src=S01/S08 note=Mic_(normal)_half
+C Cgk_1b b_g k1  1.6p ev=DATASHEET note=interelectrode_(typical_12AY7/12AX7_class)
+C Cgp_1b b_g p1b 1.5p ev=DATASHEET
+C Cpk_1b p1b k1  0.5p ev=DATASHEET
+C Cgk_1n n_g k1  1.6p ev=DATASHEET
+C Cgp_1n n_g p1n 1.5p ev=DATASHEET
+C Cpk_1n p1n k1  0.5p ev=DATASHEET
+R Rpl_1b b3 p1b 100k tol=0.05 ev=HIST src=S03 note=plate_load
+R Rpl_1n b3 p1n 100k tol=0.05 ev=HIST src=S03 note=plate_load
+R Rk1    k1 0   820  tol=0.05 ev=HIST src=S03 note=shared_cathode_resistor
+C Ck1    k1 0   25u  tol=0.20 ev=HIST src=S03 note=shared_cathode_bypass
+C Cc_1b  p1b wb 0.1u tol=0.10 ev=HIST src=S03 note=channel_coupling_(modern_yellow_cap)
+C Cc_1n  p1n wn 0.1u tol=0.10 ev=HIST src=S03
+
+# ===== Interacting volumes + tone network (dossier Sec. 08).  Wipers are driven from the plate coupling caps.
+# Volume pot: track end A = ground, track end B = mix node m;  R_lower = alpha*RT (wiper->gnd), R_upper = (1-alpha)*RT
+R Rvb_lo wb 0  500k dyn tol=0.20 novar ev=ASSUMED note=Instrument_volume_lower_track_(taper_UNKNOWN)
+R Rvb_hi wb m  500k dyn tol=0.20 novar ev=ASSUMED note=Instrument_volume_upper_track
+R Rvn_lo wn 0  500k dyn tol=0.20 novar ev=ASSUMED note=Mic_volume_lower_track
+R Rvn_hi wn m  500k dyn tol=0.20 novar ev=ASSUMED note=Mic_volume_upper_track
+# Tone pot: wiper = mix node m; end Ta -> 500 pF -> Instrument wiper; end Tb -> 5 nF -> ground
+R Rt_a   m ta  500k dyn tol=0.20 novar ev=ASSUMED note=tone_track_toward_bright_cap
+R Rt_b   m tb  500k dyn tol=0.20 novar ev=ASSUMED note=tone_track_toward_5nF
+C Cbright ta wb 500p tol=0.10 ev=HIST src=S03/S05 note=bright_cap_(500pF)
+C Ctone   tb 0  5n   tol=0.10 ev=HIST src=S03/S05 note=treble_shunt_(0.005uF)
+
+# ===== V2A: 12AX7 voltage-gain stage (grid = mix node m; volume pots act as grid leak)
+TRIODE V2A p2a m kb2 type=12AX7 ev=CONF src=S01/S18
+C Cgk_2a m kb2  1.6p ev=DATASHEET
+C Cgp_2a m p2a  1.7p ev=DATASHEET
+C Cpk_2a p2a kb2 0.46p ev=DATASHEET
+R Rpl_2a b3 p2a 100k tol=0.05 ev=HIST src=S03
+R Rk2a   kb2 0  1.5k tol=0.05 ev=HIST src=S03
+C Ck2a   kb2 0  25u  tol=0.20 ev=HIST src=S03
+C Cc_2   p2a g2b 0.022u tol=0.10 ev=HIST src=S03 note=gain-stage_to_cathodyne_coupling_(0.022uF_per_dossier_Sec.14)
+
+# ===== V2B: 12AX7 cathodyne phase inverter (dossier Sec. 09): 1M returns to the 1.5k/56k junction (bootstrap)
+TRIODE V2B p2b g2b kcy type=12AX7 ev=CONF src=S01/S18
+C Cgk_2b g2b kcy 1.6p ev=DATASHEET
+C Cgp_2b g2b p2b 1.7p ev=DATASHEET
+C Cpk_2b p2b kcy 0.46p ev=DATASHEET
+R Rpl_2b b3 p2b 56k  tol=0.05 ev=HIST src=S03 note=plate_load
+R Rkb    kcy j  1.5k tol=0.05 ev=HIST src=S03 note=cathode_bias_resistor
+R Rtail  j 0    56k  tol=0.05 ev=HIST src=S03 note=lower_cathode_load
+R Rgl_2b g2b j  1Meg tol=0.05 ev=HIST src=S03 note=grid_return_to_junction_(bootstrap)
+
+# ===== Output coupling, grid stoppers and leaks
+C Cc_3   p2b c3 0.1u tol=0.10 ev=HIST src=S03 note=inverted_output_coupling
+R Rgl_3  c3 0   220k tol=0.05 ev=HIST src=S03
+R Rgs_3  c3 g3  1.5k tol=0.05 ev=HIST src=S03 note=grid_stopper
+C Cc_4   kcy c4 0.1u tol=0.10 ev=HIST src=S03 note=non-inverted_output_coupling
+R Rgl_4  c4 0   220k tol=0.05 ev=HIST src=S03
+R Rgs_4  c4 g4  1.5k tol=0.05 ev=HIST src=S03 note=grid_stopper
+
+# ===== V3/V4: 6V6 cathode-biased push-pull pair, screens direct to B+2 (dossier Sec. 10)
+PENTODE V3 p3 g3 b2 k34 ev=CONF src=S01/S19 note=manual_prints_6V6GC;_product_page_6V6
+PENTODE V4 p4 g4 b2 k34 ev=CONF src=S01/S19
+C Cgk_3 g3 k34 9.5p ev=DATASHEET note=typical_6V6_class th=1
+C Cgp_3 g3 p3  0.7p ev=DATASHEET th=1
+C Cpk_3 p3 k34 7.5p ev=DATASHEET th=1
+C Cgk_4 g4 k34 9.5p ev=DATASHEET th=1
+C Cgp_4 g4 p4  0.7p ev=DATASHEET th=1
+C Cpk_4 p4 k34 7.5p ev=DATASHEET th=1
+R Rk34 k34 0 250 tol=0.05 ev=HIST src=S03 note=shared_cathode_bias_resistor
+C Ck34 k34 0 25u tol=0.20 ev=HIST src=S03
+
+# ===== Output transformer: centre-tapped primary, flux-state core (dossier Sec. 12).  n(full)=sqrt(1000)=31.6228 (8k:8) 
+# UNKNOWN for the modern OEM part: ratio/inductances below are the FTDO-59 class (S10) plus ASSUMED parasitics.
+# Windings: A = P3->CT, B = CT->P4, S = secondary hot->ground.  Ns = 1 (all turns secondary-referred).
+XFMR OT a1=p3 a2=b1 b1=b1 b2=p4 s1=sp s2=0 Nh=15.8113883 Ns=1 Ra=125 Rb=125 Rs=0.35 Lla=8m Llb=8m Lls=24u P0=25m phisat=0.060 Pair=0.5m ev=ASSUMED src=S10 note=FTDO-59_class_ratio_HIST;_R,Ll,Lm,Bsat_ASSUMED
+
+# ===== Loudspeaker electrical model (dossier Sec. 17): u = Re i + Le di/dt + Bl v ; motional impedance as parallel RLC
+# PN 7708599000 parameters are UNKNOWN -> generic 12-inch alnico guitar-driver ASSUMED values (set from manifest)
+R Re   sp sx 6.4   dyn ev=ASSUMED note=voice-coil_DC_resistance_(cold)
+L Le   sx sy 0.7m  dyn ev=ASSUMED note=voice-coil_inductance
+R Res  sy 0  33.7  dyn ev=ASSUMED note=motional_resistance_Bl^2/Rms
+C Cmes sy 0  284u  dyn ev=ASSUMED note=motional_capacitance_Mms/Bl^2
+L Lces sy 0  8.94m dyn ev=ASSUMED note=motional_inductance_Cms*Bl^2
+R Rext sp 0  1G    dyn ev=PROP note=extension_speaker_(resistive)
+R Rdum sp 0  1G    dyn ev=PROP note=resistive_dummy_load_(bench_boundary)
+
+# ===== Power supply (dossier Sec. 11): PT secondary -> Rs -> 5Y3 anodes -> reservoir -> 5k -> 22k
+R Rs_a ra 0 90 dyn ev=ASSUMED note=PT_half-winding_+_reflected_primary_resistance
+R Rs_b rb 0 90 dyn ev=ASSUMED
+DIODE D1 ra b1 ev=CONF src=S01/S23 note=5Y3_anode_A
+DIODE D2 rb b1 ev=CONF src=S01/S23 note=5Y3_anode_B
+C C1 b1 0 16u tol=0.20 ev=HIST src=S03 note=reservoir_B+1
+R Rdrop1 b1 b2 5k  tol=0.05 ev=HIST src=S03
+C C2 b2 0 16u tol=0.20 ev=HIST src=S03 note=B+2_(screens)
+R Rdrop2 b2 b3 22k tol=0.05 ev=HIST src=S03
+C C3 b3 0 16u tol=0.20 ev=HIST src=S03 note=B+3_(preamp)

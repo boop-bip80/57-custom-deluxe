@@ -1,0 +1,468 @@
+{
+ "target": "Fender 57 Custom Deluxe",
+ "model_family": "815050",
+ "pr_number": "PR 728",
+ "profile": "provisional_public_source_nominal",
+ "profile_note": "Documented approximation of the modern amplifier (dossier Sec. 33). Not a measured one-to-one model: no specimen was measured.",
+ "specimen_serial": null,
+ "reference_boundary": "input_jack_to_speaker_terminals",
+ "dossier": "Fender 57 Custom Deluxe -- Public-source Engineering Dossier, Edition 1, 5 November 2026",
+ "sample_rate_hz": null,
+ "calibration": {
+  "volts_per_full_scale_input_sample": 1.0,
+  "output_samples_per_volt": 0.03536,
+  "source_impedance_ohm": 100.0,
+  "fixed_delay_samples": "derived: oversampler group delay, reported to the host"
+ },
+ "parameters": {
+  "rated_output_power": {
+   "value": 12.5,
+   "unit": "W",
+   "status": "manufacturer_documented",
+   "source": "S01,S02",
+   "note": "into 8 ohm, <5% THD, 1 kHz; marketed as 12 W. Used as a calibration anchor and acceptance check."
+  },
+  "rated_thd": {
+   "value": 0.05,
+   "unit": "fraction",
+   "status": "manufacturer_documented",
+   "source": "S01,S02"
+  },
+  "rated_thd_frequency": {
+   "value": 1000.0,
+   "unit": "Hz",
+   "status": "manufacturer_documented",
+   "source": "S01,S02"
+  },
+  "mains_power_draw": {
+   "value": 85.0,
+   "unit": "W",
+   "status": "manufacturer_documented",
+   "source": "S01,S02"
+  },
+  "speaker_nominal_impedance": {
+   "value": 8.0,
+   "unit": "ohm",
+   "status": "manufacturer_documented",
+   "source": "S02"
+  },
+  "input1_impedance": {
+   "value": 1000000.0,
+   "unit": "ohm",
+   "status": "manufacturer_documented",
+   "source": "S01,S02",
+   "note": "reproduced by the jack network (checked in validation)"
+  },
+  "input2_impedance": {
+   "value": 136000.0,
+   "unit": "ohm",
+   "status": "manufacturer_documented",
+   "source": "S01,S02",
+   "note": "reproduced by the jack network (checked in validation)"
+  },
+  "input2_attenuation": {
+   "value": -6.0,
+   "unit": "dB",
+   "status": "manufacturer_documented",
+   "source": "S01,S02",
+   "note": "nominal"
+  },
+  "tube_complement": {
+   "value": "1x12AY7, 1x12AX7, 2x6V6, 1x5Y3",
+   "unit": "-",
+   "status": "manufacturer_documented",
+   "source": "S01,S02",
+   "note": "manual prints 6V6GC, product page 6V6; installed marking must be recorded per specimen"
+  },
+  "speaker_part": {
+   "value": "Eminence Special Design alnico 12in, Fender PN 7708599000",
+   "unit": "-",
+   "status": "manufacturer_documented",
+   "source": "S01,S02,S11"
+  },
+  "fuse_100_120V": {
+   "value": "F2A L 250V",
+   "unit": "-",
+   "status": "manufacturer_documented",
+   "source": "S02"
+  },
+  "fuse_220_240V": {
+   "value": "F1A L 250V",
+   "unit": "-",
+   "status": "manufacturer_documented",
+   "source": "S02"
+  },
+  "rated_output_rms_voltage": {
+   "value": 10.0,
+   "unit": "V",
+   "status": "derived",
+   "source": "S01",
+   "note": "sqrt(12.5*8)"
+  },
+  "rated_output_rms_current": {
+   "value": 1.25,
+   "unit": "A",
+   "status": "derived",
+   "source": "S01"
+  },
+  "rated_output_peak_voltage_sine": {
+   "value": 14.142,
+   "unit": "V",
+   "status": "derived",
+   "source": "S01"
+  },
+  "netlist": {
+   "value": "data/netlist/cd57_nominal.net",
+   "unit": "-",
+   "status": "historical_nominal",
+   "source": "S03,S05",
+   "note": "topology and component values are the historical 5E3 baseline; modern service schematic not authenticated (dossier Sec. 04)",
+   "verified_on_modern_specimen": false
+  },
+  "ot_turns_ratio_full_primary": {
+   "value": 31.6228,
+   "unit": "ratio",
+   "status": "historical_nominal",
+   "source": "S10",
+   "note": "FTDO-59 8k:8 class; identity with modern OEM part unproven",
+   "verified_on_modern_specimen": false
+  },
+  "pt_hv_half_winding_rms": {
+   "value": 360.0,
+   "unit": "V",
+   "status": "assumed",
+   "source": "calibration",
+   "interval": [
+    330.0,
+    380.0
+   ],
+   "note": "supply transformer parameters UNKNOWN; value calibrated so the model reproduces the documented 12.5 W at <5% THD (see validation)"
+  },
+  "pt_series_resistance_per_half": {
+   "value": 90.0,
+   "unit": "ohm",
+   "status": "assumed",
+   "interval": [
+    50.0,
+    150.0
+   ],
+   "note": "PT secondary + reflected primary resistance"
+  },
+  "ot_primary_inductance_full": {
+   "value": 25.0,
+   "unit": "H",
+   "status": "assumed",
+   "interval": [
+    10.0,
+    60.0
+   ]
+  },
+  "ot_leakage_inductance_full_ref": {
+   "value": 0.04,
+   "unit": "H",
+   "status": "assumed",
+   "interval": [
+    0.01,
+    0.08
+   ]
+  },
+  "ot_dcr_primary_half": {
+   "value": 125.0,
+   "unit": "ohm",
+   "status": "assumed",
+   "interval": [
+    80.0,
+    200.0
+   ]
+  },
+  "ot_dcr_secondary": {
+   "value": 0.35,
+   "unit": "ohm",
+   "status": "assumed",
+   "interval": [
+    0.2,
+    0.6
+   ]
+  },
+  "ot_core_saturation_flux_per_secondary_turn": {
+   "value": 0.06,
+   "unit": "V*s",
+   "status": "assumed",
+   "interval": [
+    0.04,
+    0.09
+   ],
+   "note": "no public saturation data (dossier Sec. 12)"
+  },
+  "tube_interelectrode_capacitances": {
+   "value": "12AX7/12AY7 1.5-1.7/1.5-1.7/0.46-0.5 pF, 6V6 9.5/0.7/7.5 pF",
+   "unit": "pF",
+   "status": "assumed",
+   "source": "S08,S09,S19",
+   "note": "datasheet-class values"
+  },
+  "grid_conduction_law": {
+   "value": "I=k*(s*softplus((vgk-vc)/s))^1.5",
+   "unit": "-",
+   "status": "assumed",
+   "note": "onset and slope need measurements (dossier Sec. 16)"
+  },
+  "volume_pot_taper": {
+   "value": null,
+   "unit": "fraction_vs_angle",
+   "status": "unknown",
+   "source": "S01",
+   "note": "manufacturer advertises revised tapers; numerical law not located"
+  },
+  "volume_pot_taper_provisional": {
+   "value": "audio, alpha(0.5)=0.15",
+   "unit": "-",
+   "status": "assumed",
+   "note": "selectable in the plugin (audio-15 / audio-10 / linear); not claimed as the modern Fender taper"
+  },
+  "tone_pot_taper_provisional": {
+   "value": "linear",
+   "unit": "-",
+   "status": "assumed"
+  },
+  "pot_total_resistance": {
+   "value": 1000000.0,
+   "unit": "ohm",
+   "status": "historical_nominal",
+   "source": "S03",
+   "interval": [
+    800000.0,
+    1200000.0
+   ]
+  },
+  "pot_endpoint_contact_resistance": {
+   "value": 20.0,
+   "unit": "ohm",
+   "status": "proposed",
+   "note": "documented small contact resistance instead of dividing by zero (dossier Sec. 08)"
+  },
+  "speaker_Re": {
+   "value": 6.4,
+   "unit": "ohm",
+   "status": "assumed",
+   "interval": [
+    5.5,
+    7.2
+   ],
+   "note": "exact-target value UNKNOWN (dossier manifest example lists null)"
+  },
+  "speaker_Le": {
+   "value": 0.0007,
+   "unit": "H",
+   "status": "assumed",
+   "interval": [
+    0.0003,
+    0.0012
+   ]
+  },
+  "speaker_fs": {
+   "value": 98.0,
+   "unit": "Hz",
+   "status": "assumed",
+   "interval": [
+    75.0,
+    120.0
+   ]
+  },
+  "speaker_Qms": {
+   "value": 5.5,
+   "unit": "-",
+   "status": "assumed",
+   "interval": [
+    3.0,
+    9.0
+   ]
+  },
+  "speaker_Qes": {
+   "value": 1.0,
+   "unit": "-",
+   "status": "assumed",
+   "interval": [
+    0.6,
+    1.6
+   ]
+  },
+  "speaker_Mms": {
+   "value": 0.0195,
+   "unit": "kg",
+   "status": "assumed",
+   "interval": [
+    0.012,
+    0.03
+   ]
+  },
+  "speaker_Sd": {
+   "value": 0.05,
+   "unit": "m^2",
+   "status": "assumed",
+   "interval": [
+    0.045,
+    0.055
+   ]
+  },
+  "speaker_voice_coil_tempco": {
+   "value": 0.00393,
+   "unit": "1/K",
+   "status": "proposed",
+   "note": "copper; conductor not verified (dossier Sec. 18)"
+  },
+  "speaker_thermal_Cth": {
+   "value": 8.0,
+   "unit": "J/K",
+   "status": "proposed",
+   "interval": [
+    3.0,
+    20.0
+   ],
+   "note": "single compartment"
+  },
+  "speaker_thermal_Rth": {
+   "value": 6.0,
+   "unit": "K/W",
+   "status": "proposed",
+   "interval": [
+    3.0,
+    12.0
+   ]
+  },
+  "speaker_Bl_of_x_and_Kms_of_x": {
+   "value": null,
+   "unit": "curves",
+   "status": "unknown",
+   "note": "large-signal speaker nonlinearity not modelled (no data)"
+  },
+  "cabinet_internal_geometry": {
+   "value": null,
+   "unit": "-",
+   "status": "unknown",
+   "source": "S01",
+   "note": "no dimensioned drawing located"
+  },
+  "cabinet_microphone_room_chain": {
+   "value": null,
+   "unit": "-",
+   "status": "unknown"
+  },
+  "acoustic_path_difference": {
+   "value": 0.42,
+   "unit": "m",
+   "status": "assumed",
+   "interval": [
+    0.25,
+    0.7
+   ],
+   "note": "PROVISIONAL open-back dipole path difference"
+  },
+  "acoustic_rear_level": {
+   "value": 0.8,
+   "unit": "-",
+   "status": "assumed",
+   "interval": [
+    0.5,
+    1.0
+   ]
+  },
+  "acoustic_cone_rolloff": {
+   "value": 5200.0,
+   "unit": "Hz",
+   "status": "assumed",
+   "interval": [
+    3500.0,
+    7000.0
+   ],
+   "note": "PROVISIONAL generic 12in driver"
+  },
+  "acoustic_presence_peak": {
+   "value": {
+    "f_Hz": 2900,
+    "gain_dB": 3.0,
+    "Q": 1.3
+   },
+   "unit": "-",
+   "status": "assumed",
+   "note": "PROVISIONAL cone-mode proxy; not PN 7708599000"
+  },
+  "tube_12AY7_koren": {
+   "value": {
+    "mu": 48.61152367492053,
+    "ex": 1.1396872966957237,
+    "kg1": 528.4672857216838,
+    "kp": 260.7724157567514,
+    "kvb": 4999.9999999999945
+   },
+   "unit": "Koren",
+   "status": "candidate_fit",
+   "source": "S08,S09,S18,S21,S24",
+   "note": "fitted to digitised JJ transfer sheet + RCA anchor; rms error 0.070 mA over 40 points; no specimen curve-traced"
+  },
+  "tube_12AX7_koren": {
+   "value": {
+    "mu": 110.63732696133685,
+    "ex": 1.056386655836464,
+    "kg1": 414.6903745877589,
+    "kp": 537.8463419355891,
+    "kvb": 4999.999999998192
+   },
+   "unit": "Koren",
+   "status": "candidate_fit",
+   "source": "S08,S09,S18,S21,S24",
+   "note": "fitted to digitised JJ transfer sheet + RCA anchor; rms error 0.077 mA over 32 points; no specimen curve-traced"
+  },
+  "tube_6V6_pentode": {
+   "value": {
+    "mu": 13.105645047337903,
+    "ex": 1.4000639063819529,
+    "kg1": 592.158660743239,
+    "kp": 25.040402451880542,
+    "fs0": 0.09090909090909091,
+    "vk": 55.0,
+    "q": 1.5,
+    "va": 2340.0
+   },
+   "unit": "Koren+screen partition",
+   "status": "candidate_fit",
+   "source": "S19,S22",
+   "note": "fitted to RCA 6V6GT operating point; JJ sheet appears triode-connected and agrees within a few % at 150-200 V"
+  },
+  "rectifier_5Y3_forward": {
+   "value": {
+    "k1_mA_per_V": 1.2805455475603387,
+    "k2_mA_per_V2": 0.014826134111256052
+   },
+   "unit": "mA",
+   "status": "candidate_fit",
+   "source": "S20,S23"
+  },
+  "calibration_volts_per_full_scale_input_sample": {
+   "value": 1.0,
+   "unit": "V",
+   "status": "assumed",
+   "interval": [
+    0.1,
+    5.0
+   ],
+   "note": "user-adjustable 'Input Cal'; NOT a Fender specification"
+  },
+  "calibration_output_samples_per_volt": {
+   "value": 0.03536,
+   "unit": "1/V",
+   "status": "proposed",
+   "note": "0 dBFS = 28.28 V peak at the speaker terminals (rated 12.5 W sine, 14.14 V peak = -6 dBFS)"
+  },
+  "source_impedance": {
+   "value": 100.0,
+   "unit": "ohm",
+   "status": "assumed",
+   "interval": [
+    0.0,
+    10000.0
+   ],
+   "note": "line/DI default; pickup+cable model optional"
+  }
+ }
+}
