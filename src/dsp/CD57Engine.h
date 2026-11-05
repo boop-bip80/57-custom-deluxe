@@ -57,7 +57,7 @@ struct EngineParams {
     float noise = 0.0f; int noiseSeed = 1;
     bool speakerHeating = true;
     // acoustic
-    int outputMode = 1;                  // 0 terminals, 1 provisional mic, 2 user IR (plugin)
+    int outputMode = 1;                  // plugin output selector (0 provisional mic, 1 terminals, 2 user IR, 3 user IR on cone motion); unused by the engine
     float micRadial = 0.15f, micDistance = 0.10f;
 };
 

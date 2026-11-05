@@ -1,8 +1,11 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include <juce_audio_formats/juce_audio_formats.h>
+
 using namespace juce;
 namespace pid = cd57ui::id;
+namespace om = cd57ui::outmode;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Background rebuild of the engine (oversampling change): never allocate on the audio thread.
@@ -63,9 +66,11 @@ AudioProcessorValueTreeState::ParameterLayout CD57AudioProcessor::createLayout()
     bo(pid::bypass, "Bypass", false);
     // load / output
     ch(pid::load, "Speaker Load", {"Internal speaker 8 ohm", "Internal + extension 8 ohm", "Dummy load 8 ohm", "Dummy load 4 ohm", "Dummy load 16 ohm"}, 0);
-    ch(pid::outMode, "Output", {"Microphone (provisional model)", "Speaker terminals", "User IR (voltage to mic)"}, 0);
-    fl(pid::micPos, "Mic Position", lin(0.0f, 1.0f, 0.001f), 0.15f);
-    fl(pid::micDist, "Mic Distance", lin(0.0f, 1.0f, 0.001f), 0.10f);
+    // saved by index: the first three entries are unchanged from earlier versions, the hybrid mode was appended
+    ch(pid::outMode, "Output", {"Microphone (provisional model)", "Speaker terminals", "User IR (voltage to mic)", "User IR on cone motion (hybrid)"}, 0);
+    // geometric proxies of the PROVISIONAL microphone model only (ignored by both IR modes); no measured positions exist
+    fl(pid::micPos, "Mic Position (provisional model)", lin(0.0f, 1.0f, 0.001f), 0.15f);
+    fl(pid::micDist, "Mic Distance (provisional model)", lin(0.0f, 1.0f, 0.001f), 0.10f);
     fl(pid::inTrim, "Input Trim", lin(-24.0f, 24.0f, 0.1f), 0.0f, " dB");
     fl(pid::outLevel, "Output Level", lin(-30.0f, 12.0f, 0.1f), 0.0f, " dB");
     // service / lab
@@ -93,6 +98,13 @@ CD57AudioProcessor::CD57AudioProcessor()
 {
     netlist_ = cd57::embeddedNetlist();
     manifestText_ = cd57::embeddedManifest();
+    {   // the speaker the engine will use (manifest applied exactly as CD57Engine::makeConfig does): source of G(f) for the hybrid route
+        cd57::Manifest man;
+        cd57::AmpConfig cfg;
+        if (man.load(manifestText_).empty()) man.apply(cfg);
+        speaker_ = cfg.speaker;
+    }
+    irStatus_ = "No IR loaded: the IR output modes pass the speaker terminals through unchanged";
     pBypass_ = apvts.getRawParameterValue(pid::bypass);
     apvts.addParameterListener(pid::oversample, this);
     rebuilder_ = std::make_unique<Rebuilder>(*this);
@@ -158,8 +170,8 @@ void CD57AudioProcessor::buildEngineBlocking(int oversampleLog2)
     }
     engineOS_.store(oversampleLog2);
     requestedOS_.store(oversampleLog2);
-    setLatencySamples(engine_->latencySamples());
-    diag.latency.store(engine_->latencySamples());
+    setLatencySamples(totalLatency(engine_->latencySamples()));
+    diag.latency.store(totalLatency(engine_->latencySamples()));
     diag.internalRateHz.store((int)(sampleRate_ * (1 << oversampleLog2)));
 }
 
@@ -167,11 +179,20 @@ void CD57AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     sampleRate_ = sampleRate;
     maxBlock_ = std::max(64, std::min(samplesPerBlock, 2048));
-    monoIn_.assign((size_t)maxBlock_, 0.0f); outTerm_.assign((size_t)maxBlock_, 0.0f); outAc_.assign((size_t)maxBlock_, 0.0f); irBuf_.assign((size_t)maxBlock_, 0.0f);
-    buildEngineBlocking((int)apvts.getRawParameterValue(pid::oversample)->load());
+    monoIn_.assign((size_t)maxBlock_, 0.0f); outTerm_.assign((size_t)maxBlock_, 0.0f); outAc_.assign((size_t)maxBlock_, 0.0f);
+    irBuf_.assign((size_t)maxBlock_, 0.0f); coneBuf_.assign((size_t)maxBlock_, 0.0f);
     spec_ = {sampleRate, (uint32)maxBlock_, 1};
+    {   // re-derive the processed IR(s) at the new rate from the raw capture, THEN prepare (JUCE: load before prepare)
+        const ScopedLock l(irLock_);
+        rebuildImpulseResponsesLocked();
+    }
     convolution_.prepare(spec_);
+    convolutionCone_.prepare(spec_);
     convolution_.reset();
+    convolutionCone_.reset();
+    convLatency_.store(std::max(convolution_.getLatency(), convolutionCone_.getLatency()));
+    lastMode_ = -1;
+    buildEngineBlocking((int)apvts.getRawParameterValue(pid::oversample)->load());
 }
 
 void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
@@ -188,7 +209,7 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
             std::swap(engine_, pending_);
             if (rebuilder_) rebuilder_->retired = std::move(pending_);
             engineOS_.store(engine_->params().oversampleLog2);
-            const int lat = engine_->latencySamples();
+            const int lat = totalLatency(engine_->latencySamples());
             diag.latency.store(lat);
             diag.internalRateHz.store((int)(sampleRate_ * (1 << engine_->params().oversampleLog2)));
             latencyToApply_.store(lat);
@@ -204,7 +225,14 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
     params.oversampleLog2 = engine_->params().oversampleLog2;
     engine_->setParams(params);
     const int mode = params.outputMode;
-    const bool useIR = mode == 2 && irLoaded_.load();
+    const bool irReady = irLoaded_.load(std::memory_order_acquire);
+    const bool useIR = mode == om::userIr && irReady;
+    const bool useCone = mode == om::userIrCone && irReady;
+    if (mode != lastMode_) {                       // a convolver that was idle holds stale history: restart it when its mode is selected
+        lastMode_ = mode;
+        if (useIR) convolution_.reset();
+        if (useCone) convolutionCone_.reset();
+    }
 
     int done = 0;
     float peak = 0.0f;
@@ -218,9 +246,9 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
         }
         engine_->process(monoIn_.data(), outTerm_.data(), outAc_.data(), n);
         const float* res = outAc_.data();
-        if (mode == 1) res = outTerm_.data();
+        if (mode == om::speakerTerminals) res = outTerm_.data();
         else if (useIR) {
-            // User IR (voltage -> mic): fed with the speaker-terminal voltage; the provisional acoustic model is bypassed.
+            // Route 1, "User IR": fed with the speaker-terminal voltage (output units); the provisional acoustic model is bypassed.
             for (int i = 0; i < n; ++i) irBuf_[(size_t)i] = outTerm_[(size_t)i];
             float* ch[1] = {irBuf_.data()};
             AudioBuffer<float> ab(ch, 1, n);
@@ -228,7 +256,19 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
             dsp::ProcessContextReplacing<float> ctx(blk);
             convolution_.process(ctx);
             res = irBuf_.data();
-        } else if (mode == 2) res = outTerm_.data();
+        } else if (useCone) {
+            // Route 2, hybrid: the model's cone velocity [m/s] -> volume velocity Sd*v, expressed in volts-equivalent (/gRef) and in the
+            // same output units as route 1 (kOut), then the residual R = H G*/(|G|^2+lambda) (AcousticFactor.h).  Same arrival-time origin.
+            const double scale = engine_->outputScale() * coneInputScale_.load(std::memory_order_relaxed);
+            const auto& vc = engine_->coneVelocityBlock();
+            for (int i = 0; i < n; ++i) coneBuf_[(size_t)i] = (float)(scale * vc[(size_t)i]);
+            float* ch[1] = {coneBuf_.data()};
+            AudioBuffer<float> ab(ch, 1, n);
+            dsp::AudioBlock<float> blk(ab);
+            dsp::ProcessContextReplacing<float> ctx(blk);
+            convolutionCone_.process(ctx);
+            res = coneBuf_.data();
+        } else if (mode == om::userIr || mode == om::userIrCone) res = outTerm_.data();    // no IR loaded yet: speaker terminals
         for (int c = 0; c < outCh; ++c) {
             float* dst = buffer.getWritePointer(c) + done;
             for (int i = 0; i < n; ++i) dst[i] = res[i];
@@ -254,13 +294,80 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+namespace {
+// Reads channel 0 of an audio file as float samples, UNCHANGED (no normalisation, no trimming).  Integer PCM maps to +-1 full scale,
+// so a gain above 0 dBFS needs a 32-bit float file.  At most 10 s are read.
+bool readIrFile(const File& f, std::vector<float>& samples, double& rate, int& channels, bool& longer, String& err)
+{
+    AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<AudioFormatReader> r(fm.createReaderFor(f));
+    if (!r) { err = "not a readable audio file"; return false; }
+    if (r->lengthInSamples <= 0 || r->sampleRate <= 0.0 || r->numChannels == 0) { err = "empty audio file"; return false; }
+    const int n = (int)std::min<int64>(r->lengthInSamples, (int64)(10.0 * r->sampleRate));
+    longer = r->lengthInSamples > n;
+    AudioBuffer<float> b((int)r->numChannels, n);
+    if (!r->read(&b, 0, n, 0, true, true)) { err = "read failed"; return false; }
+    samples.assign(b.getReadPointer(0), b.getReadPointer(0) + n);
+    rate = r->sampleRate; channels = (int)r->numChannels;
+    return true;
+}
+} // namespace
+
 void CD57AudioProcessor::loadImpulseResponse(const File& f)
 {
-    if (!f.existsAsFile()) return;
-    convolution_.loadImpulseResponse(f, dsp::Convolution::Stereo::no, dsp::Convolution::Trim::yes, 0, dsp::Convolution::Normalise::yes);
+    std::vector<float> samples; double rate = 0.0; int channels = 0; bool longer = false; String err;
+    const bool ok = f.existsAsFile() && readIrFile(f, samples, rate, channels, longer, err);
     const ScopedLock l(irLock_);
-    irName_ = f.getFileName(); irPath_ = f.getFullPathName();
-    irLoaded_.store(true);
+    irPath_ = f.getFullPathName();                // remembered even if the file cannot be read now, so a saved state keeps its reference
+    if (!ok) {
+        irStatus_ = "IR NOT LOADED (" + (f.existsAsFile() ? err : String("file not found")) + "): " + f.getFullPathName();
+        return;                                   // a previously loaded IR stays active
+    }
+    irName_ = f.getFileName();
+    irRaw_ = std::move(samples);
+    irFileRate_ = rate; irFileChannels_ = channels;
+    irHash_ = String::toHexString((int64)cd57::hashSamples(irRaw_));
+    rebuildImpulseResponsesLocked();
+    if (channels > 1) irStatus_ += "  [channel 1 of " + String(channels) + " used]";
+    if (longer) irStatus_ += "  [file longer than 10 s: only the first 10 s were read]";
+}
+
+// Derives the processed IR (route 1) and the cone-motion residual (route 2) from the raw capture at the current host rate and hands both
+// to the convolvers.  All allocation happens here, on the calling (message / prepare) thread.
+void CD57AudioProcessor::rebuildImpulseResponsesLocked()
+{
+    if (irRaw_.empty() || irFileRate_ <= 0.0) { irLoaded_.store(false, std::memory_order_release); return; }
+    const std::vector<double> raw(irRaw_.begin(), irRaw_.end());
+    const auto ir = cd57::prepareImpulseResponse(raw, irFileRate_, sampleRate_, 2.0);
+    cd57::FactorSettings fset;
+    fset.sampleRate = sampleRate_;
+    const cd57::SpeakerTS spk = speaker_;
+    const auto fr = cd57::factorResidual(ir.h, [&spk](double hz) { return cd57::speakerVolumeVelocityPerVolt(spk, hz); }, fset);
+    if (fr.residual.empty() || !(fr.gRef > 0.0)) {
+        irLoaded_.store(false, std::memory_order_release);
+        irStatus_ = "IR NOT LOADED (factorisation failed): " + irPath_;
+        return;
+    }
+    auto toBuffer = [](const std::vector<double>& v) {
+        AudioBuffer<float> b(1, (int)v.size());
+        for (size_t i = 0; i < v.size(); ++i) b.setSample(0, (int)i, (float)v[i]);
+        return b;
+    };
+    // Normalise::no and Trim::no: gain, polarity and arrival time are the file's.  The buffer is already at the host rate, so JUCE
+    // applies no resampling (and its fs_in/fs_out gain factor is exactly 1).
+    convolution_.loadImpulseResponse(toBuffer(ir.h), sampleRate_, dsp::Convolution::Stereo::no, dsp::Convolution::Trim::no, dsp::Convolution::Normalise::no);
+    convolutionCone_.loadImpulseResponse(toBuffer(fr.residual), sampleRate_, dsp::Convolution::Stereo::no, dsp::Convolution::Trim::no, dsp::Convolution::Normalise::no);
+    coneInputScale_.store(spk.Sd / fr.gRef);
+    irTailSeconds_.store((double)ir.h.size() / sampleRate_);
+    irLoaded_.store(true, std::memory_order_release);
+
+    String st;
+    st << "IR " << irName_ << ": " << String(irFileRate_, 0) << " Hz, " << (int)ir.fileSamples << " samples -> " << (int)ir.h.size() << " at " << String(sampleRate_, 0)
+       << " Hz, onset " << String(ir.onsetMs, 2) << " ms, peak " << String(ir.peakAbs, 3) << (ir.cutAtMaxLength ? ", CUT at 2 s (10 ms fade)" : "")
+       << ". Hybrid exact over " << String(fr.usableLoHz, 0) << "-" << String(fr.usableHiHz, 0) << " Hz (0.5 dB), residual gain bound +" << String(fr.gainBoundDb, 0) << " dB";
+    if (fr.nonCausalDb > -30.0) st << ". WARNING: no arrival delay in the IR (non-causal part " << String(fr.nonCausalDb, 0) << " dB dropped): hybrid accuracy is limited";
+    irStatus_ = st;
 }
 
 AudioProcessorEditor* CD57AudioProcessor::createEditor() { return new CD57Editor(*this); }
@@ -268,7 +375,14 @@ AudioProcessorEditor* CD57AudioProcessor::createEditor() { return new CD57Editor
 void CD57AudioProcessor::getStateInformation(MemoryBlock& dest)
 {
     auto state = apvts.copyState();
-    { const ScopedLock l(irLock_); state.setProperty("irPath", irPath_, nullptr); }
+    {   // reference to the raw capture + enough metadata to detect that the file changed; the processed IRs are re-derived on load
+        const ScopedLock l(irLock_);
+        state.setProperty("irPath", irPath_, nullptr);
+        state.setProperty("irFileRate", irFileRate_, nullptr);
+        state.setProperty("irFileSamples", (int)irRaw_.size(), nullptr);
+        state.setProperty("irFileChannels", irFileChannels_, nullptr);
+        state.setProperty("irHash", irHash_, nullptr);
+    }
     if (auto xml = state.createXml()) copyXmlToBinary(*xml, dest);
 }
 
@@ -277,9 +391,13 @@ void CD57AudioProcessor::setStateInformation(const void* data, int size)
     if (auto xml = getXmlFromBinary(data, size)) {
         auto tree = ValueTree::fromXml(*xml);
         if (tree.isValid()) {
-            const String irp = tree.getProperty("irPath").toString();
+            const String irp = tree.getProperty("irPath").toString(), savedHash = tree.getProperty("irHash").toString();
             apvts.replaceState(tree);
-            if (irp.isNotEmpty()) loadImpulseResponse(File(irp));
+            if (irp.isNotEmpty()) {
+                loadImpulseResponse(File(irp));
+                const ScopedLock l(irLock_);
+                if (savedHash.isNotEmpty() && irHash_.isNotEmpty() && savedHash != irHash_) irStatus_ += "  WARNING: this file differs from the capture saved in the state";
+            }
         }
     }
 }
