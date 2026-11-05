@@ -10,17 +10,22 @@ Pipeline (re-runnable end to end:  python3 scripts/digitize_jj_sheets.py)
     value  v0 + k*step  and a straight line  pixel = a*value + b  is fitted by least squares per axis.
     The residual of every line is reported in pixels and in data units.  (Tick marks are used where the
     printed grid is not aligned with the labelled values: ECC83S plate-panel x axis.)
- 2. Curve extraction.  Each curve is entered through a seed (an approximate point read from the label order
-    on the sheet), snapped to the nearest ridge, then followed in both directions by a ridge tracker that
-    works in the pixel image: perpendicular darkness profile, sub-pixel centroid, tangent from the last
-    samples.  Pixels lying on the (calibrated, known) printed grid lines are removed from the profile
-    (normalised convolution), so the dense ECC83S minor grid -- the same colour as the curves -- does not
-    capture the tracker.  Label text and dashes are bridged by polynomial extrapolation and re-acquired
-    only if the ridge re-appears on the predicted path.  Traced samples are smoothed with a spline whose
-    residual (pixels) is reported per curve; outliers are rejected.
- 3. Outputs: dense CSVs  data/tubes/digitized/<tube>_JJ_<S>.csv  (panel,parameter,x,y),
-    overlay PNGs of the traced points drawn over the original image, and digitization_report.json
-    (calibration residuals, per-curve statistics, Pa=14 W hyperbola check).
+ 2. Grid removal.  The printed grid lines are known from step 1.  A grid pixel keeps its ink only if the pixel just
+    outside the line is dark too (a curve really crosses the line there); all other grid pixels are cleared.  The dense
+    ECC83S minor grid, drawn in the same ink as the curves, is removed this way.
+ 3. Curve extraction.  Curves are found by pixel analysis, not by hand-placed points: rows (or columns) are scanned,
+    a ridge tracker is started at every dark run, and it follows the curve (perpendicular darkness profile, sub-pixel
+    centroid, polynomial prediction).  Label text and printed legend are masked as rotated rectangles; gaps (labels,
+    grid crossings) are bridged by extrapolation and the continuation is accepted only if it lies on the predicted
+    line and is parallel to it, so the tracker does not jump onto a crossing curve.  Parameter labels are assigned
+    from the order in which the curves cross a stated line of the panel; the run aborts if the number of curves
+    differs from the number of labels or if neighbouring curves cross.  Dashed families are found as dash
+    components and grouped into curves by their offset from a common reference line; a few curves that cross a
+    dashed line at a shallow angle are traced from explicit seeds.  Traced samples are smoothed with a spline
+    (residual reported per curve) and outliers are rejected.
+ 4. Outputs: dense CSVs  data/tubes/digitized/<tube>_JJ_<S>.csv  (panel,parameter,x,y; one row per pixel step along the
+    curve), overlay PNGs of the traced points drawn over the original image, and digitization_report.json
+    (calibration residuals, per-curve statistics, Pa = 14 W hyperbola check).
 
 Evidence label for everything written here: DIGITIZED (read from the dossier's embedded manufacturer
 figure).  Nothing here is measured on a specimen.
@@ -30,7 +35,6 @@ import csv
 import json
 import math
 import os
-import sys
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -150,15 +154,12 @@ class Panel:
         """xspec/yspec: dict(v0=, step=, n=, via='grid'|'ticks', ticks_values=[...])"""
         self.d, self.name, self.frame = d, name, frame
         self.img_path = img_path
-        x0, y0, x1, y1 = frame
         self.gx = detect_lines(d, frame, "v", expect=xspec.get("n_grid"))
         self.gy = detect_lines(d, frame, "h", expect=yspec.get("n_grid"))
         self.xcal = self._cal(xspec, self.gx, "bottom", "x")
         self.ycal = self._cal(yspec, self.gy, "left", "y")
         self.mask = self._gridmask()
         self.clean = self._remove_grid()
-        h, w = d.shape
-        self.valid = np.ones((h, w), bool)
         self.left, self.right = min(self.gx), max(self.gx)
         self.top, self.bot = min(self.gy), max(self.gy)
 
@@ -167,10 +168,7 @@ class Panel:
             vals = spec["v0"] + spec["step"] * np.arange(len(lines))
             if len(lines) != spec["n"]:
                 raise RuntimeError(f"{self.name} {ax}: {len(lines)} lines, expected {spec['n']}")
-            pix = lines
-            if ax == "y":                      # image rows grow downward; values listed top -> bottom
-                pass
-            return AxisCal(pix, vals, f"{self.name}.{ax} (grid)")
+            return AxisCal(lines, vals, f"{self.name}.{ax} (grid)")
         ticks = detect_ticks(self.d, self.frame, side)
         vals = spec["ticks_values"]
         if len(ticks) != len(vals):
@@ -205,7 +203,6 @@ class Panel:
         the curve is lost for that stretch; the tracker bridges such stretches."""
         out = self.d.copy()
         m = self.mask
-        h, w = m.shape
         # vertical-line pixels (columns), then horizontal-line pixels (rows); crossings are handled by both passes
         for axis in (1, 0):
             mm = m if axis == 1 else m.T
@@ -221,11 +218,10 @@ class Panel:
                     for c in range(a, b + 1):
                         oo[r, c] = min(oo[r, c], ev) if ev > evidence else 0.0
         # grid-line intersections (masked in both directions) were skipped by both passes: no curve evidence there
-        xs = np.zeros(m.shape[1], bool)
-        ys = np.zeros(m.shape[0], bool)
-        xs[:] = m.sum(axis=0) > 0.5 * h
-        ys[:] = m.sum(axis=1) > 0.5 * w
-        out[np.ix_(ys, xs)] = 0.0
+        x0, y0, x1, y1 = self.frame
+        cols = m[y0:y1 + 1].mean(axis=0) > 0.8
+        rows = m[:, x0:x1 + 1].mean(axis=1) > 0.8
+        out[np.ix_(rows, cols)] = 0.0
         return out
 
     # data <-> pixel
@@ -261,16 +257,15 @@ def _bilinear(img, xs, ys):
 
 
 class Tracer:
-    """Follows one curve through the pixel image.  Grid pixels (and any extra ignore rectangles) are removed from
-    the perpendicular darkness profile by normalised convolution, so a printed grid of the same ink as the curve
-    does not influence the centroid."""
+    """Follows one curve through the grid-free pixel image of a panel.  Ignore regions (label text, legend, curves
+    already traced) are removed from the perpendicular darkness profile by normalised convolution."""
 
-    def __init__(self, panel, ignore=()):
-        self.p = panel
-        valid = panel.valid & ~rasterize_regions(panel.d.shape, ignore)
+    def __init__(self, panel, ignore=(), extra_mask=None):
+        valid = ~rasterize_regions(panel.d.shape, ignore)
+        if extra_mask is not None:
+            valid &= ~extra_mask
         self.num = panel.clean * valid
         self.den = valid.astype(float)
-        x0, y0, x1, y1 = panel.frame
         self.box = (panel.left - 1.0, panel.top - 1.0, panel.right + 1.0, panel.bot + 1.0)
 
     # ---- perpendicular profile at point q with normal n, tangent t
@@ -299,7 +294,7 @@ class Tracer:
                 best = i
         if best is None:
             return None
-        # sub-pixel centroid over the ridge (contiguous region above half height), reject if grid-masked on one side
+        # sub-pixel centroid over the ridge (contiguous region above half height); reject if partly ignored/masked
         h = pr[best]
         lo = best
         while lo > 0 and pr[lo - 1] > 0.5 * h:
@@ -332,8 +327,8 @@ class Tracer:
             return None
         return float(offs[sel][np.argmax(pr[sel])])
 
-    def tangent_at(self, q, search=6.0, length=14.0):
-        """Direction of the dominant dark stroke through q (grid pixels excluded)."""
+    def tangent_at(self, q, length=14.0):
+        """Direction of the dominant dark stroke through q."""
         best, ang_best = -1.0, 0.0
         for ang in np.linspace(0, math.pi, 180, endpoint=False):
             t = np.array([math.cos(ang), math.sin(ang)])
@@ -351,10 +346,7 @@ class Tracer:
         """Move a seed to the darkest valid pixel centroid within the radius (tangent-agnostic)."""
         x, y = int(round(q[0])), int(round(q[1]))
         r = int(radius)
-        sub = self.num[y - r:y + r + 1, x - r:x + r + 1]
-        den = self.den[y - r:y + r + 1, x - r:x + r + 1]
-        # blur lightly to avoid snapping onto isolated noise
-        sub = ndimage.gaussian_filter(sub, 0.6)
+        sub = ndimage.gaussian_filter(self.num[y - r:y + r + 1, x - r:x + r + 1], 0.6)   # light blur: no snapping onto noise
         yy, xx = np.unravel_index(np.argmax(sub), sub.shape)
         return np.array([x - r + xx, y - r + yy], float)
 
@@ -612,6 +604,14 @@ def lab(prefix, values, fmt="{:g}", suffix="V"):
     return [f"{prefix}={fmt.format(v)}{suffix}" for v in values]
 
 
+# 5Y3S regulation panel: label text printed on top of the curves (rotated rectangles in image pixels) and the title/legend box
+Y3_LABELS = [("rect", 328, 180, 402, 254),
+             ("rot", 205, 217.5, 67, 17, 26.6), ("rot", 298.75, 248.25, 35, 14, 10), ("rot", 212.5, 264.5, 36, 14, 12),
+             ("rot", 287, 305.75, 68, 17, 26), ("rot", 197.5, 323, 68, 17, 26), ("rot", 275, 332.5, 35, 14, 10),
+             ("rot", 209, 361, 68, 17, 26), ("rot", 272.5, 379, 35, 14, 10), ("rot", 258, 409.5, 35, 14, 10),
+             ("rot", 252.5, 430, 35, 14, 10)]
+Y3_TRACE = dict(max_gap=45.0, gate_max=1.4)
+
 # Every family is  dict(labels=[...], order=(axis, level), ...): curves are discovered by pixel analysis and the
 # labels are assigned in the order in which the curves cross the stated line of the panel (axis 'y': the row at data
 # value `level`; ascending x).  The number of discovered curves must equal the number of labels, and adjacent curves
@@ -639,6 +639,21 @@ SHEET_CONFIG = {
                        dict(labels=["Pa=14W"], order=("x", 300.0), min_len=300, select="falling")],
              seeded=[dict(label="Ig@Ug=+20V", seeds=[(160, 12.2), (250, 12.1), (330, 12.1), (94, 13.8)], bridge_px=8.0),
                      dict(label="Ig@Ug=+5V", seeds=[(150, 7.85), (230, 7.85), (290, 7.85), (380, 7.85)], bridge_px=8.0)]),
+    ]),
+    "5Y3": dict(csv="5Y3_JJ_S23.csv", fig="Fig. 12", panels=[
+        dict(name="regulation", xname="Io [mA]", yname="Ua [V] (DC output)", frame=(126, 178, 408, 487),
+             x=grid(0, 10, 14), y=grid(500, -25, 17), ignore=Y3_LABELS,
+             seeded=[dict(label="Utr=350V,solid", seeds=[(15, 460.7), (95, 362.3), (105, 353.3)], trace=Y3_TRACE),
+                     dict(label="Utr=300V,solid", seeds=[(15, 390.8), (105, 293.7), (124, 279.5)], trace=Y3_TRACE),
+                     dict(label="Utr=250V,solid", seeds=[(15, 319.6), (95, 234.2), (105, 225.8), (124, 212.2)], trace=Y3_TRACE),
+                     dict(label="Utr=220V,solid", seeds=[(15, 278.2), (95, 194.1), (105, 187.0), (124, 174.7)], trace=Y3_TRACE)],
+             families=[dict(labels=["Utr=500V,dashed", "Utr=450V,dashed", "Utr=400V,dashed", "Utr=350V(unlabelled),dashed",
+                                    "Utr=300V,dashed", "Utr=250V,dashed", "Utr=200V,dashed"],
+                            dashed=True, mask_traced=True, cluster_gap=12.0, bridge_px=8.0)]),
+        dict(name="forward", xname="Ua [V]", yname="Ia [mA]", frame=(457, 178, 787, 488),
+             x=grid(0, 4, 26), y=grid(500, -50, 11), ignore=[("rect", 465, 183, 570, 302)],
+             families=[dict(labels=["forward(solid<60V,dashed>60V)"], order=("y", 100.0), min_len=200, min_density=0.4,
+                            trace=dict(max_gap=30.0), bridge_px=8.0)]),
     ]),
     "12AX7": dict(csv="12AX7_JJ_S24.csv", fig="Fig. 10", panels=[
         dict(name="transfer", xname="Ug [V]", yname="Ia [mA]", frame=(117, 185, 393, 524),
@@ -685,6 +700,62 @@ def trace_family(panel, tracer, fam):
     return curves
 
 
+def trace_dashed_family(panel, tracer, fam):
+    """Dashed curves.  Each dash is a short, thin, elongated connected component of the grid-free image (label text,
+    legend and solid curves already traced are masked out).  The sub-pixel centre of every dash is taken per pixel
+    column; dashes are then grouped into curves by their offset from a common straight reference (the family is
+    nearly parallel), a 1-D clustering that must yield exactly len(labels) groups ordered as the family's ordering."""
+    B = tracer.num > 0.4
+    lab, n = ndimage.label(B, structure=np.ones((3, 3)))
+    dashes = []
+    for i in range(1, n + 1):
+        ys, xs = np.nonzero(lab == i)
+        if len(xs) < 6:
+            continue
+        ext = max(np.ptp(xs), np.ptp(ys)) + 1
+        if not (fam.get("dash_min", 5) <= ext <= fam.get("dash_max", 22)):
+            continue
+        cols = np.unique(xs)
+        if len(cols) < 4:
+            continue
+        if not (panel.left + 2 < xs.mean() < panel.right - 2 and panel.top + 2 < ys.mean() < panel.bot - 2):
+            continue                                         # axis tick labels, title: outside the plot area
+        cx = np.array([c for c in cols])
+        cy = np.array([(ys[xs == c] * tracer.num[ys[xs == c], c]).sum() / tracer.num[ys[xs == c], c].sum() for c in cols])
+        slope = np.polyfit(cx, cy, 1)[0]
+        if np.std(cy - np.polyval(np.polyfit(cx, cy, 1), cx)) > 0.9 or abs(slope) > fam.get("max_slope_px", 1.0):
+            continue
+        dashes.append((cx, cy))
+    if not dashes:
+        raise RuntimeError(f"{panel.name}: no dashes found")
+    # data-space reference line through all dash centres
+    mx = np.array([c[0].mean() for c in dashes])
+    my = np.array([c[1].mean() for c in dashes])
+    X, Y = panel.val(mx, my)
+    m = float(np.median([np.polyfit(*panel.val(c[0], c[1]), 1)[0] for c in dashes]))
+    off = Y - m * X
+    order = np.argsort(off)
+    groups, cur = [], [order[0]]
+    for a, b in zip(order[:-1], order[1:]):
+        if off[b] - off[a] > fam.get("cluster_gap", 12.0):
+            groups.append(cur)
+            cur = []
+        cur.append(b)
+    groups.append(cur)
+    groups = [g for g in groups if len(g) >= fam.get("min_dashes", 6)]
+    labels = fam["labels"]
+    if len(groups) != len(labels):
+        raise RuntimeError(f"{panel.name}: found {len(groups)} dashed curves, expected {len(labels)}; "
+                           f"offsets {np.round(np.sort(off), 1)}")
+    out = []
+    # ascending offset = ascending data y; the family order is descending data y (top curve first)
+    for g, label in zip(groups[::-1], labels):
+        pts = np.vstack([np.column_stack([dashes[i][0], dashes[i][1]]) for i in g])
+        pts = pts[np.argsort(pts[:, 0])]
+        out.append((label, pts))
+    return out
+
+
 def _rising(pts):
     P = np.asarray(pts, float)
     return (P[-1, 1] - P[0, 1]) * (P[-1, 0] - P[0, 0]) < 0 if P[-1, 0] != P[0, 0] else True
@@ -727,15 +798,23 @@ def process_panel(img_dir, sheet_key, cfg, pcfg, out_dir, overlay_dir):
     panel = Panel(d, path, f"{sheet_key}.{pcfg['name']}", pcfg["frame"], pcfg["x"], pcfg["y"])
     tracer = Tracer(panel, ignore=pcfg.get("ignore", ()))
     curves = []                                          # (label, raw pts, family dict)
-    for fam in pcfg.get("families", ()):
-        for label, pts in trace_family(panel, tracer, fam):
-            if label in fam.get("extra", {}):                # seeds for stretches the discovery cut at a crossing
-                more = [tracer.trace(panel.pix(sx, sy)) for (sx, sy) in fam["extra"][label]]
-                pts = merge_traces([pts] + more, fam.get("sort", 0))
-            curves.append((label, pts, fam))
     for spec in pcfg.get("seeded", ()):
         tr = Tracer(panel, ignore=list(pcfg.get("ignore", ())) + list(spec.get("ignore", ())))
         curves.append((spec["label"], trace_seeded(panel, tr, spec), spec))
+    for fam in pcfg.get("families", ()):
+        tr = tracer
+        if fam.get("mask_traced"):                       # discover only what is left after the curves traced so far
+            covered = np.zeros(panel.d.shape, bool)
+            for _l, pts, _f in curves:
+                _mark(covered, pts)
+            covered = ndimage.binary_dilation(covered, iterations=2)
+            tr = Tracer(panel, ignore=pcfg.get("ignore", ()), extra_mask=covered)
+        found = trace_dashed_family(panel, tr, fam) if fam.get("dashed") else trace_family(panel, tr, fam)
+        for label, pts in found:
+            if label in fam.get("extra", {}):                # seeds for stretches the discovery cut at a crossing
+                more = [tr.trace(panel.pix(sx, sy)) for (sx, sy) in fam["extra"][label]]
+                pts = merge_traces([pts] + more, fam.get("sort", 0))
+            curves.append((label, pts, fam))
     rows, drawn, stats = [], [], []
     for label, pts, fam in curves:
         sm, st = smooth_curve(pts, sigma_px=fam.get("sigma_px", 0.2), max_bridge_px=fam.get("bridge_px", 5.0))
@@ -745,6 +824,12 @@ def process_panel(img_dir, sheet_key, cfg, pcfg, out_dir, overlay_dir):
         rows += [(pcfg["name"], label, float(x), float(y)) for x, y in zip(xs, ys)]
         drawn.append((label, sm))
         st.update(parameter=label, x_range=[float(xs.min()), float(xs.max())], y_range=[float(ys.min()), float(ys.max())])
+        if label.startswith("Pa="):
+            # Calibration check on the printed constant-dissipation hyperbola: Ua * Ia should equal the printed Pa
+            pa = xs * ys / 1000.0                                              # W (Ua in V, Ia in mA)
+            sel = xs >= 200.0
+            st.update(printed_Pa_W=float(label[3:-1]), Ua_times_Ia_W_all=[float(pa.min()), float(np.median(pa)), float(pa.max())],
+                      Ua_times_Ia_W_at_or_above_200V=[float(pa[sel].min()), float(np.median(pa[sel])), float(pa[sel].max())])
         stats.append(st)
     os.makedirs(overlay_dir, exist_ok=True)
     draw_overlay(panel, drawn, os.path.join(overlay_dir, f"{SHEETS[sheet_key][0][:-4]}_{pcfg['name']}.png"))
