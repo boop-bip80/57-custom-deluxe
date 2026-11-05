@@ -94,10 +94,11 @@ int main(int argc, char** argv)
             return nullptr;
         };
         auto* outMode = findParam("Output");
-        CHECK(outMode != nullptr && outMode->getAllValueStrings().size() == 4, "Output parameter exposes 4 modes (3 earlier ones + hybrid appended)");
-        if (outMode && outMode->getAllValueStrings().size() == 4) {
-            CHECK(outMode->getAllValueStrings()[3].containsIgnoreCase("hybrid"), "mode 3 is the hybrid: '" + outMode->getAllValueStrings()[3] + "'");
-            CHECK(outMode->getAllValueStrings()[2].containsIgnoreCase("User IR") && outMode->getAllValueStrings()[0].containsIgnoreCase("Microphone"), "modes 0 and 2 keep their earlier meaning (preset compatibility)");
+        CHECK(outMode != nullptr && outMode->getNumSteps() == 4, "Output parameter exposes 4 modes (3 earlier ones + hybrid appended)");
+        if (outMode && outMode->getNumSteps() == 4) {
+            CHECK(outMode->getText(1.0f, 64).containsIgnoreCase("hybrid"), "mode 3 is the hybrid: '" + outMode->getText(1.0f, 64) + "'");
+            CHECK(outMode->getText(2.0f / 3.0f, 64).containsIgnoreCase("User IR") && outMode->getText(0.0f, 64).containsIgnoreCase("Microphone") && outMode->getText(1.0f / 3.0f, 64).containsIgnoreCase("terminals"),
+                  "modes 0, 1, 2 keep their earlier meaning (preset compatibility): '" + outMode->getText(0.0f, 64) + "' / '" + outMode->getText(1.0f / 3.0f, 64) + "' / '" + outMode->getText(2.0f / 3.0f, 64) + "'");
         }
         if (auto* heat = findParam("Speaker Heating")) heat->setValue(0.0f);       // keep the speaker's Re constant for exact route comparisons
 
@@ -109,8 +110,10 @@ int main(int argc, char** argv)
             if (irPath.isNotEmpty()) xml->setAttribute("irPath", irPath); else xml->removeAttribute("irPath");
             MemoryBlock nb; AudioProcessor::copyXmlToBinary(*xml, nb);
             inst->setStateInformation(nb.getData(), (int)nb.getSize());
+            std::cout << "    [applyState: requested mode " << mode << ", parameter now reads " << (outMode ? (int)std::lround(outMode->getValue() * 3.0f) : -1) << ", IR '" << irPath << "']\n";
         };
         auto currentMode = [&]() { return outMode ? (int)std::lround(outMode->getValue() * 3.0f) : -1; };
+        std::cout << "  outMode parameter " << (outMode ? "found" : "NOT FOUND") << ", value " << (outMode ? outMode->getValue() : -1.0f) << "\n";
         auto render = [&](const std::vector<float>& in) {
             inst->setPlayConfigDetails(2, 2, fs, 512);
             inst->prepareToPlay(fs, 512);          // fresh deterministic engine state; the processed IRs are re-derived here
