@@ -6,16 +6,66 @@ every number below was measured by building the JUCE-free tools (`-DCD57_BUILD_P
 `AmpCircuit` / `Network` directly. Baseline reproduced first: `cd57_validate` = 27 passed / 0 failed, report identical to
 `docs/VALIDATION_REPORT.md`.
 
-Status of this document: **checkpoint 2 of 4** (defects D1-D15 written; PASS review partly updated; requirement matrix and hardware-gated list follow) (written incrementally; sections marked `TODO-AUDIT` are not finished yet).
+Status of this document: **complete (checkpoint 4)**. Written incrementally; the commit history of `docs/DOSSIER_COMPLIANCE.md` on this branch shows each checkpoint.
 
 Evidence tags: **MEASURED** (I ran it), **READ** (code reading, not executed), **DOSSIER** (quoted requirement).
 
+## 0. Summary
+
+The implementation is a real circuit-level model, not a chain of EQ and waveshapers: an independent re-implementation of the netlist reproduces its DC point to 0.23 V and its
+small-signal gains to 0.0025 dB (Sec. 5), the netlist matches Fig. 7 and the Sec. 14 table element for element, and the solver, block independence, 10-minute heavy-drive stability, automation and
+rate independence all hold up under attack (Sec. 0.2). The weaknesses are (a) the **validation suite**: of the 27 PASS lines, two are meaningless (alias, burst recovery), one is a
+calibration reported as evidence (12.5 W), two measure an artefact (sample-rate THD, "independent" AC solver at a displaced bias point), and several cannot fail; (b) the **power-valve
+and rectifier constitutive laws**, which are anchored on numbers from outside the PDF and not fitted to the dossier's own 6V6 sheet; (c) **real-time hygiene**: allocation in the callback, an
+unbounded recovery path, an 8x mode that is not real-time; and (d) a handful of **provenance and bookkeeping gaps** (manifest entries that drive nothing, an unrun Jacobian check, a phantom
+heating state).
+
+### 0.1 Defects ranked by impact (what to fix first)
+
+| Rank | ID | Sev | One line | Measured evidence |
+|---|---|---|---|---|
+| 1 | D5 | S1 | 6V6 law fitted to four external numbers, not to the dossier's 6V6 sheet; no error reported where the amp runs (347 V / 298 V / -21 V) | model/sheet current ratio 0.21-1.03 (mean 0.76); class-AB1 target 70 mA, model 59.6 mA; idle plate dissipation 13.5 W per tube |
+| 2 | D6 | S1 | 12.5 W / <5 % THD is a one-parameter calibration, +-25 % over its own interval, and mis-measured low | 10.3 / 13.55 / 15.9 W at PT 330 / 360 / 380 V; report prints 12.85 W |
+| 3 | D1 | S2 | alias check measures the folded 8th harmonic; true alias floor is far above the dossier's -80 dBFS limit at the default | 2x -39, 4x -58, 8x -72, 16x -86.5 dBFS (ripple-free) |
+| 4 | D7 | S2 | convergence is a 10 mV step test; silicon mode accepts a 53 A KCL error; failures inside the plugin's own range; NaN stalls the audio thread | 36 / 89 / 744 failures at 10 V / 80 V / cal 5 V + 24 dB; NaN 56 ms |
+| 5 | D9 | S2 | heap allocation inside `process()` whenever sub-stepping engages (README says none) | 10-15 allocations per block under drive |
+| 6 | D3 | S2 | burst "35 ms recovery" is broadband rms of the thump; check cannot fail | lock-in: 0.825x at 35 ms, 65 ms to 10 %, 150 ms to 5 %, dip to 0.65x |
+| 7 | D8 | S2 | 44.1 kHz THD discrepancy is a non-integer analysis window | 0.12 dB true spread over 14 rate/oversampling configurations |
+| 8 | D10 | S2 | dummy-load mode heats a disconnected coil; no terminal-current output | +26 K phantom heating after 30 s; Dossier Sec. 05 asks for V and I |
+| 9 | D2 | S2/S3 | decimator transition 0.5-0.55 fs lets 24-26 kHz fold at < 30 dB; latency "exact" but rounded up | -8.7 / -12.2 / -29 dB at 24.5 / 25 / 26.4 kHz; 30.5 vs 31 samples |
+| 10 | D11 | S3 | 42 of 55 manifest entries drive nothing; Jacobian check never run; external anchors labelled as dossier-cited; 12AY7 mu/rp +10 % | Jacobian 3.1e-5 (true, but unsupported by tests) |
+| 11 | D12, D13, D15, D16, D14 | S3 | 8x not real-time; engine swap loses state; discretisation reported at the best rate; assumed saturation law active; possible HF double count | see each |
+
+What I would fix first: D5 and D6 together (they decide whether any Sec. 26 nonlinear number means anything), then the validation metrics D1/D3/D8 (they currently give false assurance), then D7/D9
+(real-time safety), then D10/D11 (bookkeeping).
+
+### 0.2 What held up under attack (positive findings, all measured)
+
+* Independent re-implementation (own parser, stamps, tube laws, DC solver, AC solve): DC <= 0.23 V, AC <= 0.0025 dB and 0.003 deg (Sec. 5). Jacobian vs finite differences 3.1e-5 over 38 heavy-drive states (`p12`).
+* Netlist = Fig. 7 = Sec. 14 table, including the jack switching (1.0 M / 136.0 k / -6.03 dB reproduced, not fitted), bootstrapped cathodyne, plate-coupled wipers, bright and tone caps.
+* Block-size independence is bit-exact in 32 configurations including speaker heating (D4). Rate independence at 1 kHz: H2-H7 within 0.12 dB over 44.1-192 kHz hosts and 1-8x oversampling (D8), H3 within 0.2 dB down to a 22.05 kHz host (`p27`).
+* 10 minutes of randomised heavy plucked drive with speaker heating: 0 non-finite samples, 0 failures, 0 panics, rails and coil temperature bounded (`p14`).
+* Automation: no click on an abrupt 0.3->0.9 volume step, no zipper in a slow sweep, power switch decays and recharges smoothly (`p10`).
+* LU kernel and generic solver identical at 7 extreme control states with 0 guarded pivots; trapezoid RC error 3.3e-6 V; LC energy 0.9999-1.0000 (`p23`, `p26`).
+* Speaker coupling: circuit cone velocity per volt equals the closed form used to calibrate the acoustic block (ratio 1.0000, 0.00 deg); heating changes only Re(T) in the circuit (no second compressor); user-IR and provisional acoustic modes are mutually exclusive.
+* The shipped baseline VST3 (built by the coordinator in `/tmp/claude-0/b_full`) passes `cd57_host_test`: 181 checks, "ALL PASSED", latency 31 samples at 44.1/48/96 kHz. I did not rebuild the plugin and did not run valgrind.
+* 5Y3 rectifier + 30 ohm source + 4 uF reservoir versus the **held-out** left panel of the JJ 5Y3S sheet: within about 3-4 % (7-18 V low) at Utr 220-350 V (`p25`, reading error +-8 V).
+
+### 0.3 Reproduction index
+
+Probes (all under `/tmp/claude-0/audit/probes/`, built with `build.sh NAME`; none is in the repo): `p1_alias` (D1), `p2_oslat` (D2), `p3_burst` (D3), `p4_block` (D4), `p5_jacks`, `p6_pots`, `p7_dc`, `p8_silicon` (D7),
+`p9_stress` (D7, D12), `p10_auto`, `p11_rate` (D8), `p12_jac` (D11), `p13_speaker` (D10, D14), `p14_long`, `p15_alloc` / `p16_alloc2` (D9), `p17_swap` (D13), `p18_tube` (D5, D11), `p19_anchor` (D6),
+`p20_acerr` (D15), `p21_hum`, `p22_cpp_ref.cpp` + `p22_indep.py` (Sec. 5), `p23_misc`, `p25_y3`, `p26_sat` (D16), `p27_prep`. The `scripts/fit_tubes.py` numbers in D5 come from a copy of the script run under
+`/tmp/claude-0/audit/fitroot` (the repo's `data/` and `generated/` were not touched).
+
+Not verified: the JUCE plugin was read, not rebuilt; Windows/macOS builds; valgrind; anything that needs hardware (Sec. 4).
+
 ---
 
-## 1. Ranked defect list (living)
+## 1. Ranked defect list
 
 Severity: **S1** changes the electrical/audible result or invalidates a headline claim; **S2** wrong or misleading
-validation/diagnostic; **S3** robustness / hygiene / documentation.
+validation/diagnostic or real-time hazard; **S3** robustness / hygiene / documentation. Entries are in the order they were found; the impact ranking is in Sec. 0.1.
 
 ### D1 (S2, validation invalid) The "strongest alias" figure is not aliasing and not mains ripple: it is the 8th harmonic folded by the half-band transition band
 
@@ -153,7 +203,7 @@ validation/diagnostic; **S3** robustness / hygiene / documentation.
   "no ... hidden solver failures".
 * Reproduce `p9_stress.cpp` (speaker load, vol 0.9, 1 kHz, 0.4 s): jack amplitude 0.05 / 0.2 / 0.6 V: 0 failures (0 / 1.0 / 2.7 % of steps sub-stepped);
   **10 V: 36 failures; 80 V: 89 failures**; inputCal 5 V + trim +24 dB (79 V at the jack, both are plugin parameter ranges): **744 failures** in 102 400 steps;
-  1e6 FS input: 774 failures and **165 ms for one 512-sample block** (15x real time; the worst case per sample is
+  1e6 FS input: **165 ms for one 512-sample block** and 774 cumulative failures on that engine (NaN, Inf and 1e6 blocks) (15x real time; the worst case per sample is
   20 iterations x (1 + 2 + 4 + 8 + 16 + 32 sub-steps) = 1 260 Newton iterations against a typical 1.25). The report's failure check stops at 600 mV at the jack.
   The fall-back for an unrecovered step is "hold the last accepted state for one step" (counted, shown in the UI) - defined and visible, as Sec. 31 requires, but its rate inside the supported range is not stated.
 * NaN: one NaN sample in a 512-block -> the whole block is output as zeros, `recover()` re-runs `initialiseQuiescent` on the audio thread
