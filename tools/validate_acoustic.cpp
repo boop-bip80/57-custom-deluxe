@@ -268,6 +268,34 @@ static void testSpeakerTransfer()
     }
 }
 
+static void testEngineAcousticWiring()
+{
+    section("B2. The engine feeds the provisional operator CONE VELOCITY, and its 1 kHz calibration holds through the whole engine");
+    const double fs = 48000.0;
+    EngineParams p; p.oversampleLog2 = 1; p.load = 0; p.speakerHeating = false; p.instVol = 0.5f; p.tone = 0.7f; p.inputCalVolts = 1.0f;
+    CD57Engine e; e.prepare(fs, 512, gNetlist, p, gManifest);
+    const SpeakerTS& sp = e.amp().cfg.speaker;
+    AcousticOperator op; AcousticParams ap; ap.micRadial = p.micRadial; ap.micDistance = p.micDistance;
+    op.prepare(fs); op.set(ap); op.calibrate1k(std::abs(speakerVelocityPerVolt(sp, 1000.0)));
+    std::vector<float> in(512), ot(512), oa(512);
+    std::vector<double> term, mic;
+    const int total = (int)(0.8 * fs);
+    double worst = 0, peak = 0;
+    for (int i0 = 0; i0 < total; i0 += 512) {
+        const int n = std::min(512, total - i0);
+        for (int k = 0; k < n; ++k) { const double t = (i0 + k) / fs; in[(size_t)k] = (float)(0.01 * std::sin(2 * M_PI * 1000.0 * t) * std::min(1.0, t / 0.1)); }
+        e.process(in.data(), ot.data(), oa.data(), n);
+        for (int k = 0; k < n; ++k) {
+            const double expect = e.outputScale() * op.process(e.coneVelocityBlock()[(size_t)k]);     // operator applied by this test to the engine's cone-velocity port
+            worst = std::max(worst, std::fabs(expect - (double)oa[(size_t)k])); peak = std::max(peak, std::fabs((double)oa[(size_t)k]));
+            term.push_back((double)ot[(size_t)k]); mic.push_back((double)oa[(size_t)k]);
+        }
+    }
+    check(peak > 1e-3 && worst < 1e-5 * peak, "engine microphone output == kOut x AcousticOperator(engine cone velocity): the operator is driven by the cone-velocity port, not by terminal voltage", "worst difference " + f(worst, 9) + " FS, peak " + f(peak, 4) + " FS");
+    const double ratio = dB(std::abs(lockIn(mic, fs, 1000.0, 100)) / std::abs(lockIn(term, fs, 1000.0, 100)));
+    check(std::fabs(ratio) < 0.05, "1 kHz calibration through the whole engine: microphone output / speaker-terminal output at 1 kHz is 0 dB", "ratio " + f(ratio, 4) + " dB");
+}
+
 // ---------------------------------------------------------------------------------------------------- C. IR preparation
 static cplx freqResp(const std::vector<double>& h, double fs, double f0)
 {
@@ -631,6 +659,7 @@ int main()
     gNetlist = embeddedNetlist(); gManifest = embeddedManifest();
     testProvisionalOperator();
     testSpeakerTransfer();
+    testEngineAcousticWiring();
     testIrPreparation();
     testFactorisation();
     testThroughEngine();
