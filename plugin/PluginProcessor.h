@@ -6,6 +6,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include "AcousticFactor.h"
 #include "CD57Engine.h"
 #include "EmbeddedData.h"
 
@@ -41,6 +42,13 @@ inline constexpr const char* hum = "hum";
 inline constexpr const char* noise = "noise";
 inline constexpr const char* heating = "heating";
 } // namespace id
+// values of the "outMode" choice parameter (saved in presets by index: keep the order, only ever append)
+namespace outmode {
+inline constexpr int provisionalMic = 0;     // PROVISIONAL cone-velocity -> mic operator (Acoustic.h)
+inline constexpr int speakerTerminals = 1;   // calibrated speaker-terminal volts
+inline constexpr int userIr = 2;             // route 1: measured voltage-to-mic IR applied to the terminal voltage
+inline constexpr int userIrCone = 3;         // route 2 / hybrid: the same IR factored onto the model's cone motion (AcousticFactor.h)
+} // namespace outmode
 } // namespace cd57ui
 
 class CD57AudioProcessor : public juce::AudioProcessor, private juce::AudioProcessorValueTreeState::Listener, private juce::AsyncUpdater
@@ -60,7 +68,7 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 1.0; }
+    double getTailLengthSeconds() const override { return std::max(1.0, irTailSeconds_.load()); }
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram(int) override {}
@@ -69,9 +77,15 @@ public:
     void getStateInformation(juce::MemoryBlock& dest) override;
     void setStateInformation(const void* data, int size) override;
 
-    // user impulse response (voltage -> microphone capture; replaces the provisional acoustic stage, never added to it)
+    // Measured impulse response: voltage at the speaker terminals -> microphone signal (format and conventions: AcousticFactor.h).
+    // It replaces the provisional acoustic stage and is never added to it:
+    //   "User IR"           route 1 -- convolved with the terminal voltage;
+    //   "User IR on cone motion (hybrid)"  route 2 -- the same IR factored into a residual that is convolved with the model's cone
+    //                       velocity, so cone motion and voice-coil heating of the model stay in the loop without counting the cone twice.
+    // Not called from the audio thread (reads the file, resamples, factors and hands the result to the convolvers).
     void loadImpulseResponse(const juce::File& f);
     juce::String irName() const { const juce::ScopedLock l(irLock_); return irName_; }
+    juce::String irStatus() const { const juce::ScopedLock l(irLock_); return irStatus_; }
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -106,12 +120,27 @@ private:
     int maxBlock_ = 512;
     std::string netlist_, manifestText_, manifestSummary_, manifestError_;
 
-    std::vector<float> monoIn_, outTerm_, outAc_, irBuf_;
-    juce::dsp::Convolution convolution_;
+    std::vector<float> monoIn_, outTerm_, outAc_, irBuf_, coneBuf_;
+    // Two zero-latency partitioned convolvers sharing one background queue: route 1 (terminal voltage * IR) and route 2
+    // (cone volume velocity * residual).  Only the active one is run; it is reset when its mode is selected.
+    juce::dsp::ConvolutionMessageQueue irQueue_;
+    juce::dsp::Convolution convolution_{juce::dsp::Convolution::Latency{0}, irQueue_};
+    juce::dsp::Convolution convolutionCone_{juce::dsp::Convolution::Latency{0}, irQueue_};
     juce::dsp::ProcessSpec spec_{};
+    void rebuildImpulseResponsesLocked();          // irLock_ held; message/prepare thread only
+    int totalLatency(int engineLatency) const { return engineLatency + convLatency_.load(); }
     mutable juce::CriticalSection irLock_;
-    juce::String irName_, irPath_;
+    juce::String irName_, irPath_, irStatus_;
+    std::vector<float> irRaw_;                     // raw capture (channel 0, file rate), never modified
+    double irFileRate_ = 0.0;
+    int irFileChannels_ = 0;
+    juce::String irHash_;                          // hash of the raw samples, saved in the state
+    cd57::SpeakerTS speaker_;                      // the model's speaker (manifest applied), source of G(f)
     std::atomic<bool> irLoaded_{false};
+    std::atomic<double> coneInputScale_{0.0};      // Sd / gRef : cone velocity [m/s] -> residual input (volts-equivalent), see AcousticFactor.h
+    std::atomic<double> irTailSeconds_{0.0};
+    std::atomic<int> convLatency_{0};
+    int lastMode_ = -1;
     int blockCounter_ = 0;
     std::atomic<float>* pBypass_ = nullptr;
 

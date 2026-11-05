@@ -57,6 +57,10 @@ if(CD57_BUILD_TOOLS)
         add_test(NAME netlist_register_checker_selftest
                  COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_netlist_against_register.py --self-test)
     endif()
+    # --- acoustic tests ---
+    add_executable(validate_acoustic tools/validate_acoustic.cpp)
+    target_link_libraries(validate_acoustic PRIVATE cd57_core)
+    add_test(NAME acoustic_validation COMMAND validate_acoustic)
 endif()
 
 # ------------------------------------------------------------------ plugin (VST3 + Standalone)

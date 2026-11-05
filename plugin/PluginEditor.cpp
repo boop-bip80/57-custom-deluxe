@@ -172,8 +172,8 @@ CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(
     combo(cOS_, pid::oversample, "Oversampling");
     combo(cSource_, pid::source, "Source");
     combo(cTaper_, pid::taper, "Volume taper");
-    slider(sMicPos_, pid::micPos, "Mic position");
-    slider(sMicDist_, pid::micDist, "Mic distance");
+    slider(sMicPos_, pid::micPos, "Mic position (provisional model)");
+    slider(sMicDist_, pid::micDist, "Mic distance (provisional model)");
     slider(sTrim_, pid::inTrim, "Input trim");
     slider(sOutLevel_, pid::outLevel, "Output level");
     slider(sInCal_, pid::inCal, "Input cal (V pk @ FS)");
@@ -188,10 +188,10 @@ CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(
     bypassAtt_ = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment>(proc_.apvts, pid::bypass, bypassBtn_);
     addAndMakeVisible(irBtn_); addAndMakeVisible(aboutBtn_);
     irBtn_.onClick = [this] {
-        chooser_ = std::make_unique<FileChooser>("Select a voltage-to-microphone impulse response", File(), "*.wav;*.aif;*.aiff;*.flac");
+        chooser_ = std::make_unique<FileChooser>("Select a speaker-terminal-voltage to microphone IR (untrimmed, not normalised; see Provenance)", File(), "*.wav;*.aif;*.aiff;*.flac");
         chooser_->launchAsync(FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this](const FileChooser& fc) {
             const auto f = fc.getResult();
-            if (f.existsAsFile()) { proc_.loadImpulseResponse(f); setChoice(pid::outMode, 2); }
+            if (f.existsAsFile()) { proc_.loadImpulseResponse(f); setChoice(pid::outMode, cd57ui::outmode::userIr); }
         });
     };
     aboutBtn_.onClick = [this] { showProvenance(); };
@@ -309,6 +309,8 @@ void CD57Editor::paint(Graphics& g)
     g.setColour(Colour(0x55ffffff)); g.fillRoundedRectangle(lab_.toFloat(), 10.0f);
     g.setColour(kInk); g.setFont(F(13.0f, true));
     g.drawText("OUTPUT  /  SERVICE  (nominal values; changes carry state, see Provenance)", lab_.getX() + 12, lab_.getY() + 4, 700, 16, Justification::left);
+    g.setFont(F(10.5f));
+    g.drawText(proc_.irStatus(), lab_.getX() + 12, lab_.getBottom() - 13, lab_.getWidth() - 24, 12, Justification::left);
 }
 
 void CD57Editor::resized()
@@ -355,6 +357,18 @@ void CD57Editor::showProvenance()
         << "jack network, interacting volumes/tone, shared-cathode 12AY7, 12AX7 gain stage + cathodyne, cathode-biased 6V6 pair with\n"
         << "screen/grid current, flux-state output transformer, explicit 5Y3 rectifier + 3-stage supply, electromechanical speaker load.\n"
         << "Acoustic stage: PROVISIONAL physics-based cone-velocity -> microphone operator (no measured cabinet data exists).\n"
-        << "User IR mode replaces that stage and must be a voltage-to-microphone capture.\n";
+        << "The Mic position / distance controls only move that provisional model (open-back dipole, piston directivity) and are ignored by the IR modes;\n"
+        << "there are no calibrated microphone positions, so they must not be read as physically accurate positions (dossier Sec. 19).\n\n"
+        << "USER IR (measured): the file is the impulse response of 'voltage at the speaker terminals -> microphone signal'.\n"
+        << "  * Gain is NOT normalised: samples are output-full-scale per terminal-full-scale (28.28 V peak = 0 dBFS). A single 1.0 sample = the\n"
+        << "    'Speaker terminals' output exactly. Gains above 0 dBFS need a 32-bit float file. Polarity is preserved.\n"
+        << "  * Arrival time: sample 0 = the instant the voltage reaches the terminals; microphone propagation delay stays in the file. Nothing is\n"
+        << "    trimmed. Use a mono file (channel 1 is used), at most 2 s (longer files are cut with a 10 ms fade), any sample rate.\n"
+        << "  * Sample-rate conversion: windowed-sinc, transfer function (gain, phase, delay) preserved. The raw file is never modified; its path and a hash are saved in the state.\n"
+        << "  * 'User IR' convolves the terminal voltage with the IR. 'User IR on cone motion (hybrid)' applies the same IR through a regularised\n"
+        << "    residual R = H G*/(|G|^2+lambda) to the model's cone velocity, so the model's own voice-coil heating and cone motion stay in the loop\n"
+        << "    without counting the cone twice (dossier Sec. 18/27). It needs ~0.3 ms of arrival delay in the IR and is exact only inside the band\n"
+        << "    shown in the status line. With a dummy load there is no cone motion, so the hybrid mode is silent.\n"
+        << "  * The model's speaker parameters are ASSUMED (generic 12-inch driver); the residual absorbs any difference to the real driver.\n";
     AlertWindow::showMessageBoxAsync(MessageBoxIconType::InfoIcon, "Provenance", msg);
 }
