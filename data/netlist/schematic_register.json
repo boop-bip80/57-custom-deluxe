@@ -197,5 +197,88 @@
     {"id": "D10", "item": "mains fuse", "drawing": "2 AMP slow blow, in the neutral lead", "dossier": "F2A L 250 V for 100-120 V markets (Sec. 02)", "class": "CONSISTENT", "recommendation": "none"},
     {"id": "D11", "item": "supply values", "drawing": "3 x 16-450, 5000 then 22K", "dossier": "Three x 16 uF, 5 kOhm then 22 kOhm", "class": "CONSISTENT (450 V rating only on the drawing)", "recommendation": "none"},
     {"id": "D12", "item": "all other table rows", "drawing": "68k x4, 1 MEG x2 input, 100K x2 first-stage loads, 820 + 25 uF, .1 x2 channel couplers, 100K / 1500 / 25 uF second stage, 56K plate and 56K tail, 1500 / 1 MEG cathodyne bias and grid reference, 2 x 220K, 250 + 25 uF", "dossier": "same numbers in Sec. 14 and Sec. 08-10 prose", "class": "CONSISTENT", "recommendation": "none"}
-  ]
+  ],
+  "netlist_mapping": {
+    "added_after": "Everything above was committed (8301ea6) before data/netlist/cd57_nominal.net was opened; this section was written afterwards and declares how register names map onto netlist names for scripts/check_netlist_against_register.py",
+    "netlist": "data/netlist/cd57_nominal.net",
+    "nets": {
+      "GND": "0", "BH_A": "b_t1", "BL_L": "b_t2", "V1B_G": "b_g", "V1B_P": "p1b", "V1B_C": "wb",
+      "NH_A": "n_t1", "NL_L": "n_t2", "V1A_G": "n_g", "V1A_P": "p1n", "V1A_C": "wn", "K1": "k1",
+      "TONE_T": "ta", "TONE_B": "tb", "MIX": "m", "V2A_P": "p2a", "V2A_K": "kb2",
+      "V2B_G": "g2b", "V2B_P": "p2b", "V2B_K": "kcy", "V2B_T": "j",
+      "INV_G3": "c3", "V3_G": "g3", "NON_G4": "c4", "V4_G": "g4", "K3": "k34",
+      "OT_PA": "p3", "OT_PB": "p4", "B+1": "b1", "B+2": "b2", "B+3": "b3", "SPK_HOT": "sp",
+      "RECT_PA": "ra", "RECT_PB": "rb"
+    },
+    "unmapped_nets": {
+      "RECT_F": "5Y3 second filament lead: heater circuit, carries no audio-circuit current",
+      "MAINS_HOT": "mains primary circuit is outside the audio-rate model (see not_modelled)",
+      "MAINS_NEUT": "mains primary circuit is outside the audio-rate model (see not_modelled)",
+      "PRI_A": "mains primary circuit is outside the audio-rate model (see not_modelled)",
+      "PRI_B": "mains primary circuit is outside the audio-rate model (see not_modelled)",
+      "HEATER_6V3_A": "heater winding is not drawn and not modelled",
+      "HEATER_6V3_B": "heater winding is not drawn and not modelled"
+    },
+    "extra_nodes": {
+      "pu": "guitar pickup EMF node of the source chain (not on the drawing)",
+      "tp": "source chain output (pickup + cable) that feeds the selected jack tip (not on the drawing)",
+      "sx": "speaker voice-coil resistance/inductance internal node (speaker equivalent, not on the drawing)",
+      "sy": "speaker motional-branch node (speaker equivalent, not on the drawing)"
+    },
+    "elements": {
+      "R_BH_IN": "Rb_leak", "R_BH_STOP_H": "Rb_a", "R_BH_STOP_L": "Rb_b",
+      "R_NH_IN": "Rn_leak", "R_NH_STOP_H": "Rn_a", "R_NH_STOP_L": "Rn_b",
+      "R_V1B_LOAD": "Rpl_1b", "R_V1A_LOAD": "Rpl_1n", "R_V1_K": "Rk1",
+      "R_V2A_LOAD": "Rpl_2a", "R_V2A_K": "Rk2a",
+      "R_V2B_PLATE": "Rpl_2b", "R_V2B_K": "Rkb", "R_V2B_TAIL": "Rtail", "R_V2B_GL": "Rgl_2b",
+      "R_V3_STOP": "Rgs_3", "R_V4_STOP": "Rgs_4", "R_V3_GL": "Rgl_3", "R_V4_GL": "Rgl_4",
+      "R_OUT_K": "Rk34", "R_DROP1": "Rdrop1", "R_DROP2": "Rdrop2",
+      "C_V1B_CPL": "Cc_1b", "C_V1A_CPL": "Cc_1n", "C_BRIGHT": "Cbright", "C_TONE": "Ctone",
+      "C_V1_K": "Ck1", "C_V2A_K": "Ck2a", "C_V2_CPL": "Cc_2", "C_INV_CPL": "Cc_3", "C_NON_CPL": "Cc_4",
+      "C_OUT_K": "Ck34", "C_FILT1": "C1", "C_FILT2": "C2", "C_FILT3": "C3"
+    },
+    "pots": {
+      "P_VOL_B": {"end_a": "Rvb_lo", "end_b": "Rvb_hi"},
+      "P_VOL_N": {"end_a": "Rvn_hi", "end_b": "Rvn_lo"},
+      "P_TONE":  {"end_a": "Rt_a",   "end_b": "Rt_b"}
+    },
+    "tubes": {"V1B": "V1B", "V1A": "V1A", "V2A": "V2A", "V2B": "V2B", "V3": "V3", "V4": "V4"},
+    "rectifier": {"V5": {"plate_1": "D1", "plate_2": "D2", "cathode_dc_net": "B+1"}},
+    "transformers": {
+      "OT": {"element": "OT", "primary_a": "a1", "primary_ct": "a2", "primary_ct_b": "b1", "primary_b": "b2", "secondary_hot": "s1", "secondary_cold": "s2"},
+      "PT_HV": {"elements": ["Rs_a", "Rs_b"], "note": "HV secondary modelled as two Norton half-windings, each from a rectifier plate to ground (centre tap = ground)"}
+    },
+    "jacks": {
+      "J_BH": "Sw_b1", "J_BL": "Sw_b2", "J_NH": "Sw_n1", "J_NL": "Sw_n2"
+    },
+    "speaker_equivalent": {"SPK": ["Re", "Le", "Res", "Cmes", "Lces"], "J_XSPK": "Rext"},
+    "allowed_evidence": {
+      "default_RC": ["HIST"],
+      "overrides": {
+        "Rvb_lo": ["ASSUMED"], "Rvb_hi": ["ASSUMED"], "Rvn_lo": ["ASSUMED"], "Rvn_hi": ["ASSUMED"], "Rt_a": ["ASSUMED"], "Rt_b": ["ASSUMED"],
+        "Sw_b1": ["HIST"], "Sw_b2": ["HIST"], "Sw_n1": ["HIST"], "Sw_n2": ["HIST"],
+        "V1B": ["CONF"], "V1A": ["CONF"], "V2A": ["CONF"], "V2B": ["CONF"], "V3": ["CONF"], "V4": ["CONF"], "D1": ["CONF"], "D2": ["CONF"],
+        "OT": ["ASSUMED"], "Rs_a": ["ASSUMED"], "Rs_b": ["ASSUMED"],
+        "Re": ["ASSUMED"], "Le": ["ASSUMED"], "Res": ["ASSUMED"], "Cmes": ["ASSUMED"], "Lces": ["ASSUMED"], "Rext": ["PROP"]
+      }
+    },
+    "value_overrides": {
+      "C_V2_CPL": {"netlist_value": 2.2e-8, "drawing_value": 2.0e-8, "reason": "dossier Sec. 14 states 0.022 uF; the drawing prints .02-400. The dossier is the specification given to this project, 0.022 uF is the standard value and the drawing's .02 is the coarser number, so the dossier value is the default and the drawing value is the documented alternative (register D1)."}
+    },
+    "dynamic_values": ["Sw_b1", "Sw_b2", "Sw_n1", "Sw_n2", "Rvb_lo", "Rvb_hi", "Rvn_lo", "Rvn_hi", "Rt_a", "Rt_b"],
+    "not_modelled": {
+      "SW_AC": "mains on/off is the runtime 'power' control that gates the supply source, not a netlist element",
+      "F1": "fuse in the mains primary: outside the audio-rate model (never blows in normal operation)",
+      "PLUG": "mains cord and safety ground: outside the audio-rate model",
+      "PT.primary": "mains primary winding: folded into the supply source resistance (Rs_a, Rs_b, ASSUMED)",
+      "PT.5V AC Rectifier Heater": "rectifier filament winding: heater circuit, no effect on the audio circuit",
+      "PT.6.3 V winding": "heater winding is not drawn on the schematic (arrows only) and not modelled",
+      "J_SPK": "speaker jack contacts: the internal speaker is permanently connected (see speaker_equivalent)"
+    },
+    "extras": [
+      {"category": "source_chain", "names": ["Rsrc", "Lpu", "Ccab", "Rsel_b1", "Rsel_b2", "Rsel_n1", "Rsel_n2", "Rpt_b1b2", "Rpt_n1n2", "Rpt_b1n1", "Rpt_b1n2", "Rpt_b2n1", "Rpt_b2n2"], "allowed_evidence": ["PROP"], "touches_register_nets_only": ["BH_A", "BL_L", "NH_A", "NL_L", "GND"], "reason": "guitar source, cable and patch-cable options: a modelling boundary, not on the drawing"},
+      {"category": "interelectrode", "pattern": "^C(gk|gp|pk)_", "allowed_evidence": ["DATASHEET"], "reason": "tube interelectrode capacitances: not on the drawing and not numerically in the dossier text; external datasheet-class values"},
+      {"category": "load_option", "names": ["Rdum"], "allowed_evidence": ["PROP"], "touches_register_nets_only": ["SPK_HOT", "GND"], "reason": "resistive bench dummy load option (bench boundary, not on the drawing)"}
+    ]
+  }
 }

@@ -49,6 +49,14 @@ if(CD57_BUILD_TOOLS)
         DEPENDS cd57_gen_lu COMMENT "Regenerating generated/LuKernel.h" VERBATIM)
     enable_testing()
     add_test(NAME dossier_validation COMMAND cd57_validate --quick --report ${CMAKE_CURRENT_BINARY_DIR}/validation_quick.md)
+    # --- netlist register tests ---
+    find_program(CD57_PYTHON NAMES python3 python)
+    if(CD57_PYTHON)
+        add_test(NAME netlist_vs_schematic_register
+                 COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_netlist_against_register.py)
+        add_test(NAME netlist_register_checker_selftest
+                 COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_netlist_against_register.py --self-test)
+    endif()
 endif()
 
 # ------------------------------------------------------------------ plugin (VST3 + Standalone)

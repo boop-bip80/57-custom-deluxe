@@ -185,3 +185,51 @@ Only the Bright-Hi jack is drawn with a plug. The register encodes the other sta
 | D12 | all other table rows | same numbers | same | consistent |
 
 Of the above, D1 is the only electrical value conflict.
+
+## 7. Comparison with the repository netlist (done after the register was committed)
+
+The netlist was opened only after the register and this file were committed (8301ea6). The register's
+`netlist_mapping` section declares the net-name and element-name mapping; `scripts/check_netlist_against_register.py`
+(CTest `netlist_vs_schematic_register`) diffs the two graphs through that mapping and
+`--self-test` (CTest `netlist_register_checker_selftest`) proves it fails on 14 deliberately broken netlists
+(wrong value, moved grid leak, grounded bootstrap return, screens on the wrong rail, missing part, extra part on a
+drawn net, wrong evidence tag, split cathodes, ungrounded OT secondary, ...), none of which is stored.
+
+Result for `data/netlist/cd57_nominal.net` (94 elements):
+
+| Category | Elements | Outcome |
+|---|---|---|
+| drawn resistors and capacitors | 22 R + 13 C | same nets, same values, except D1 below |
+| pot tracks | 6 (two per pot) | wiper and ends as drawn (Bright volume: ground end / mix end; Normal volume: mix end / ground end; tone: ends to the 500 pF and 5 nF caps, wiper on the mix node); track resistances add to 1 MEG |
+| tubes | V1B, V1A, V2A, V2B, V3, V4 | electrodes as drawn: V1 cathodes shared, V2A grid on the mix node, cathodyne grid return on the 1.5k/56k junction, 6V6 screens on B+2, plates on the OT primary ends, both 6V6 cathodes on one node |
+| rectifier | D1, D2 | plates on the HV winding ends, cathodes on B+1 |
+| output transformer | OT | primary ends on the 6V6 plates, centre tap on B+1, secondary hot to the speaker node, cold end to ground |
+| HV winding | Rs_a, Rs_b | each half-winding from a rectifier plate to ground (centre tap) |
+| jack switches | Sw_b1, Sw_b2, Sw_n1, Sw_n2 | Hi switch lug to ground, Lo switch lug to the Hi node; the engine (`AmpCircuit.h`) closes a switch when its jack is empty and opens it when plugged, which reproduces all four plug states of section 3 |
+| supply | C1-C3, Rdrop1, Rdrop2 | B+1 / B+2 / B+3 as drawn; B+3 feeds both V1 loads, the V2A load and the cathodyne plate load |
+
+Topology: **no discrepancy** between the independent transcription and the netlist. The LU kernel therefore did not
+need regeneration, and `cd57_validate` is unchanged (27 passed, 0 failed; only the wall-clock time differs).
+
+Values: **one** difference, D1 (`Cc_2`). The drawing prints .02-400; the dossier Sec. 14 table says 0.022 uF. The netlist
+keeps the dossier value as the default (it is the specification given to this project; 0.022 uF is the standard value
+and the drawing's .02 is the coarser number) and now records the drawing value as a documented alternative in a
+netlist comment and in the register (`value_overrides`).
+
+Waived (drawn but deliberately not in the audio-rate netlist, each with a reason in the register): AC switch (runtime
+`power` control), fuse, mains cord and safety ground, power-transformer primary, 5 V rectifier-heater winding, 6.3 V
+winding, speaker-jack contacts (the internal speaker is permanently connected).
+
+Not on the schematic and present in the netlist, with the evidence tag the checker enforces:
+
+| Netlist items | Tag required | Finding |
+|---|---|---|
+| source chain `Rsrc`, `Lpu`, `Ccab`, `Rsel_*`, `Rpt_*` (13) | PROP | correct |
+| interelectrode capacitances `Cgk_*`, `Cgp_*`, `Cpk_*` (18) | DATASHEET | tag correct; the numbers are not in the dossier text (datasheet-class values), the notes now say so |
+| speaker equivalent `Re`, `Le`, `Res`, `Cmes`, `Lces`; HV winding `Rs_a`, `Rs_b`; OT parameters | ASSUMED | correct |
+| `Rext`, `Rdum` (extra speaker, bench dummy load) | PROP | correct |
+| `tol=` attributes | n/a | specimen-variation widths, not drawing data; the netlist header now says PROP |
+
+Label corrections made: the OT note said "FTDO-59 class ratio HIST", but that ratio comes from an aftermarket
+specification (dossier Sec. 04: not OEM evidence), so the note now says so (the `ev=ASSUMED src=S10` tag was already
+right); the jack-switch notes now state that the lug wiring is drawn while the normally-closed action is derived.

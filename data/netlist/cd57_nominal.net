@@ -8,6 +8,9 @@
 # This is a DOCUMENTED APPROXIMATION of the modern amp, branch "historical 5E3 + modern nominal":
 # no factory service schematic for the modern unit was authenticated (dossier Sec. 04).
 # Node "0" is chassis ground.  "dyn" elements are driven at runtime from the plugin controls.
+# Topology and drawn values are cross-checked against an independent transcription of dossier Fig. 7
+# (data/netlist/schematic_register.json, docs/SCHEMATIC_TRANSCRIPTION.md) by scripts/check_netlist_against_register.py
+# (CTest netlist_vs_schematic_register).  tol= values are PROP specimen-variation widths, not drawing or dossier data.
 # ------------------------------------------------------------------------------------------------
 
 # ===== Source chain: guitar EMF (Norton at pu) -> series R -> pickup L -> cable C -> selected jack tip
@@ -31,14 +34,14 @@ R Rpt_b2n2 b_t2 n_t2 1G dyn ev=PROP
 R Rb_a    b_t1 b_g  68k  tol=0.05 ev=HIST src=S03 note=grid_stopper/mixing_resistor
 R Rb_b    b_t2 b_g  68k  tol=0.05 ev=HIST src=S03 note=grid_stopper/mixing_resistor
 R Rb_leak b_t1 0    1Meg tol=0.05 ev=HIST src=S03 note=input_resistor_(grid_leak)
-R Sw_b1   b_t1 0    1G   dyn ev=HIST src=S03 note=jack_1_switch:_grounds_tip_when_unplugged
-R Sw_b2   b_t2 b_t1 1G   dyn ev=HIST src=S03 note=jack_2_switch:_ties_tip_to_jack_1_when_unplugged
+R Sw_b1   b_t1 0    1G   dyn ev=HIST src=S03 note=jack_1_switch:_grounds_tip_when_unplugged_(lug_wiring_drawn_Fig.7/8;_normally-closed_action_derived)
+R Sw_b2   b_t2 b_t1 1G   dyn ev=HIST src=S03 note=jack_2_switch:_ties_tip_to_jack_1_when_unplugged_(lug_wiring_drawn_Fig.7/8;_normally-closed_action_derived)
 # Channel N = Mic (normal) channel
 R Rn_a    n_t1 n_g  68k  tol=0.05 ev=HIST src=S03
 R Rn_b    n_t2 n_g  68k  tol=0.05 ev=HIST src=S03
 R Rn_leak n_t1 0    1Meg tol=0.05 ev=HIST src=S03
-R Sw_n1   n_t1 0    1G   dyn ev=HIST src=S03
-R Sw_n2   n_t2 n_t1 1G   dyn ev=HIST src=S03
+R Sw_n1   n_t1 0    1G   dyn ev=HIST src=S03 note=jack_1_switch_(as_channel_B)
+R Sw_n2   n_t2 n_t1 1G   dyn ev=HIST src=S03 note=jack_2_switch_(as_channel_B)
 
 # NOTE: the 6V6 interelectrode capacitances carry th=1 (backward Euler): they resonate with the output-transformer
 # leakage far above Nyquist, and trapezoidal integration would ring there (dossier Sec. 21: 'Trapezoidal integration
@@ -47,7 +50,7 @@ R Sw_n2   n_t2 n_t1 1G   dyn ev=HIST src=S03
 # ===== V1: 12AY7 dual triode, shared cathode (dossier Sec. 07).  V1B = Instrument, V1A = Mic
 TRIODE V1B p1b b_g k1 type=12AY7 ev=CONF src=S01/S08 note=Instrument_(bright)_half
 TRIODE V1A p1n n_g k1 type=12AY7 ev=CONF src=S01/S08 note=Mic_(normal)_half
-C Cgk_1b b_g k1  1.6p ev=DATASHEET note=interelectrode_(typical_12AY7/12AX7_class)
+C Cgk_1b b_g k1  1.6p ev=DATASHEET note=interelectrode_(typical_12AY7/12AX7_class;_external_datasheet_value,_not_in_dossier_text)
 C Cgp_1b b_g p1b 1.5p ev=DATASHEET
 C Cpk_1b p1b k1  0.5p ev=DATASHEET
 C Cgk_1n n_g k1  1.6p ev=DATASHEET
@@ -80,7 +83,10 @@ C Cpk_2a p2a kb2 0.46p ev=DATASHEET
 R Rpl_2a b3 p2a 100k tol=0.05 ev=HIST src=S03
 R Rk2a   kb2 0  1.5k tol=0.05 ev=HIST src=S03
 C Ck2a   kb2 0  25u  tol=0.20 ev=HIST src=S03
-C Cc_2   p2a g2b 0.022u tol=0.10 ev=HIST src=S03 note=gain-stage_to_cathodyne_coupling_(0.022uF_per_dossier_Sec.14)
+# DOSSIER vs DRAWING (register D1): Fig. 7 prints .02-400 (0.02 uF; Fig. 8: .02, 600 V).  Default = dossier Sec. 14, 0.022 uF
+# (HIST S03, the specification given to this project; 0.022 uF is also the standard value).  The drawing value 0.02u (HIST S05)
+# is the documented alternative; swap it in to test sensitivity.
+C Cc_2   p2a g2b 0.022u tol=0.10 ev=HIST src=S03 note=gain-stage_to_cathodyne_coupling_(0.022uF_per_dossier_Sec.14;_drawing_prints_.02uF_=_documented_alternative)
 
 # ===== V2B: 12AX7 cathodyne phase inverter (dossier Sec. 09): 1M returns to the 1.5k/56k junction (bootstrap)
 TRIODE V2B p2b g2b kcy type=12AX7 ev=CONF src=S01/S18
@@ -103,7 +109,7 @@ R Rgs_4  c4 g4  1.5k tol=0.05 ev=HIST src=S03 note=grid_stopper
 # ===== V3/V4: 6V6 cathode-biased push-pull pair, screens direct to B+2 (dossier Sec. 10)
 PENTODE V3 p3 g3 b2 k34 ev=CONF src=S01/S19 note=manual_prints_6V6GC;_product_page_6V6
 PENTODE V4 p4 g4 b2 k34 ev=CONF src=S01/S19
-C Cgk_3 g3 k34 9.5p ev=DATASHEET note=typical_6V6_class th=1
+C Cgk_3 g3 k34 9.5p ev=DATASHEET note=typical_6V6_class_(external_datasheet_value,_not_in_dossier_text) th=1
 C Cgp_3 g3 p3  0.7p ev=DATASHEET th=1
 C Cpk_3 p3 k34 7.5p ev=DATASHEET th=1
 C Cgk_4 g4 k34 9.5p ev=DATASHEET th=1
@@ -115,7 +121,7 @@ C Ck34 k34 0 25u tol=0.20 ev=HIST src=S03
 # ===== Output transformer: centre-tapped primary, flux-state core (dossier Sec. 12).  n(full)=sqrt(1000)=31.6228 (8k:8) 
 # UNKNOWN for the modern OEM part: ratio/inductances below are the FTDO-59 class (S10) plus ASSUMED parasitics.
 # Windings: A = P3->CT, B = CT->P4, S = secondary hot->ground.  Ns = 1 (all turns secondary-referred).
-XFMR OT a1=p3 a2=b1 b1=b1 b2=p4 s1=sp s2=0 Nh=15.8113883 Ns=1 Ra=125 Rb=125 Rs=0.35 Lla=8m Llb=8m Lls=24u P0=25m phisat=0.060 Pair=0.5m ev=ASSUMED src=S10 note=FTDO-59_class_ratio_HIST;_R,Ll,Lm,Bsat_ASSUMED
+XFMR OT a1=p3 a2=b1 b1=b1 b2=p4 s1=sp s2=0 Nh=15.8113883 Ns=1 Ra=125 Rb=125 Rs=0.35 Lla=8m Llb=8m Lls=24u P0=25m phisat=0.060 Pair=0.5m ev=ASSUMED src=S10 note=FTDO-59_class_ratio_(aftermarket_spec_S10,_not_OEM_evidence);_R,Ll,Lm,Bsat_ASSUMED
 
 # ===== Loudspeaker electrical model (dossier Sec. 17): u = Re i + Le di/dt + Bl v ; motional impedance as parallel RLC
 # PN 7708599000 parameters are UNKNOWN -> generic 12-inch alnico guitar-driver ASSUMED values (set from manifest)
