@@ -19,6 +19,9 @@
 #include <new>
 #include <string>
 #include <vector>
+#ifdef _MSC_VER
+#include <malloc.h>
+#endif
 
 #include "CD57Engine.h"
 #include "EmbeddedData.h"
@@ -33,19 +36,26 @@ void* operator new(std::size_t n)
     throw std::bad_alloc();
 }
 void* operator new[](std::size_t n) { return operator new(n); }
+// aligned allocation is platform specific: posix_memalign + free on POSIX, _aligned_malloc + _aligned_free on MSVC (the CRT requires the pair)
+#ifdef _MSC_VER
+static void* alignedAlloc(std::size_t n, std::size_t a) { return _aligned_malloc(n ? n : 1, a); }
+static void alignedFree(void* p) { _aligned_free(p); }
+#else
+static void* alignedAlloc(std::size_t n, std::size_t a) { void* p = nullptr; return posix_memalign(&p, std::max<std::size_t>(a, sizeof(void*)), n ? n : 1) == 0 ? p : nullptr; }
+static void alignedFree(void* p) { std::free(p); }
+#endif
 void* operator new(std::size_t n, std::align_val_t a)
 {
     if (gCount.load(std::memory_order_relaxed)) gAllocs.fetch_add(1, std::memory_order_relaxed);
-    void* p = nullptr;
-    if (posix_memalign(&p, std::max<std::size_t>((std::size_t)a, sizeof(void*)), n ? n : 1) != 0) throw std::bad_alloc();
-    return p;
+    if (void* p = alignedAlloc(n, (std::size_t)a)) return p;
+    throw std::bad_alloc();
 }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
-void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::align_val_t) noexcept { alignedFree(p); }
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept { alignedFree(p); }
 
 using namespace cd57;
 
