@@ -48,16 +48,16 @@ add("netlist", "data/netlist/cd57_nominal.net", "-", "historical_nominal", "S03,
 add("ot_turns_ratio_full_primary", 31.6228, "ratio", "historical_nominal", "S10", note="FTDO-59 8k:8 class; identity with modern OEM part unproven", verified=False)
 
 # ---- ASSUMED (explicit assumption + sensitivity interval, dossier Sec. 28)
-add("pt_hv_half_winding_rms", 360.0, "V", "assumed", "calibration", [330.0, 380.0],
-    note="supply transformer parameters UNKNOWN; value calibrated so the model reproduces the documented 12.5 W at <5% THD (see validation)")
+add("pt_hv_half_winding_rms", 377.4, "V", "assumed", "calibration", [330.0, 400.0],
+    note="supply transformer parameters UNKNOWN; value CALIBRATED (cd57_validate --calibrate-pt) so the interpolated 5% THD power into 8 ohm equals the documented 12.5 W for the JJ-fitted tube laws; the anchor weakly constrains this value (see the sensitivity table in the validation report)")
 add("pt_series_resistance_per_half", 90.0, "ohm", "assumed", None, [50.0, 150.0], note="PT secondary + reflected primary resistance")
 add("ot_primary_inductance_full", 25.0, "H", "assumed", None, [10.0, 60.0])
 add("ot_leakage_inductance_full_ref", 0.040, "H", "assumed", None, [0.01, 0.08])
 add("ot_dcr_primary_half", 125.0, "ohm", "assumed", None, [80.0, 200.0])
 add("ot_dcr_secondary", 0.35, "ohm", "assumed", None, [0.2, 0.6])
 add("ot_core_saturation_flux_per_secondary_turn", 0.060, "V*s", "assumed", None, [0.04, 0.09], note="no public saturation data (dossier Sec. 12)")
-add("tube_interelectrode_capacitances", "12AX7/12AY7 1.5-1.7/1.5-1.7/0.46-0.5 pF, 6V6 9.5/0.7/7.5 pF", "pF", "assumed", "S08,S09,S19", note="datasheet-class values")
-add("grid_conduction_law", "I=k*(s*softplus((vgk-vc)/s))^1.5", "-", "assumed", None, note="onset and slope need measurements (dossier Sec. 16)")
+add("tube_interelectrode_capacitances", "12AX7/12AY7 1.5-1.7/1.5-1.7/0.46-0.5 pF, 6V6 9.5/0.7/7.5 pF", "pF", "assumed", None, note="datasheet-class values that are NOT contained in the dossier text (external, unverified offline)")
+add("triode_grid_conduction_law", "I=k*(s*softplus((vgk-vc)/s))^1.5 (k=0.35 mA/V^1.5, vc=-0.5 V, s=0.15 V)", "-", "assumed", None, note="no grid-current data for the 12AY7/12AX7 in the dossier; onset and slope need measurements (dossier Sec. 16)")
 add("volume_pot_taper", None, "fraction_vs_angle", "unknown", "S01", note="manufacturer advertises revised tapers; numerical law not located")
 add("volume_pot_taper_provisional", "audio, alpha(0.5)=0.15", "-", "assumed", None, note="selectable in the plugin (audio-15 / audio-10 / linear); not claimed as the modern Fender taper")
 add("tone_pot_taper_provisional", "linear", "-", "assumed")
@@ -81,15 +81,27 @@ add("acoustic_rear_level", 0.80, "-", "assumed", None, [0.5, 1.0])
 add("acoustic_cone_rolloff", 5200.0, "Hz", "assumed", None, [3500.0, 7000.0], note="PROVISIONAL generic 12in driver")
 add("acoustic_presence_peak", {"f_Hz": 2900, "gain_dB": 3.0, "Q": 1.3}, "-", "assumed", None, note="PROVISIONAL cone-mode proxy; not PN 7708599000")
 
-# ---- fitted constitutive models (candidate_fit)
+# ---- fitted constitutive models (candidate_fit).  These entries DOCUMENT the values compiled into generated/TubeFits.h by
+# scripts/fit_tubes.py; the C++ loader does not read them (see docs/TRACEABILITY.md, 'manifest consumption').
 for t in ("12AY7", "12AX7"):
     f = fits["triode_koren"][t]
-    add("tube_" + t + "_koren", {k: f[k] for k in ("mu", "ex", "kg1", "kp", "kvb")}, "Koren", "candidate_fit", "S08,S09,S18,S21,S24",
-        note="fitted to digitised JJ transfer sheet + RCA anchor; rms error %.3f mA over %d points; no specimen curve-traced" % (f["rms_mA"], f["n_points"]))
+    r = f["fit_operating_region"]
+    add("tube_" + t + "_koren", {k: f[k] for k in ("mu", "ex", "kg1", "kp", "kvb")}, "Koren", "candidate_fit", "S21,S24",
+        note=("fitted to %d pixel-digitised points of the JJ transfer + plate sheet; operating region (Vp 50-350 V, Vg -6..0 V): rms %.3f mA, "
+              "relative %.1f %% (tail-dominated); whole held-out curves and cross-panel prediction in data/tubes/fitted_models.json; "
+              "local mu/rp/gm at the RCA point differ from the RCA numbers the dossier quotes (a JJ-vs-RCA data difference, not forced); "
+              "no specimen curve-traced; grid conduction ASSUMED") % (f["n_points"], r["rms_mA"], 100 * r["rel_rms"]))
 v = fits["pentode_6V6"]
-add("tube_6V6_pentode", {k: v[k] for k in ("mu", "ex", "kg1", "kp", "fs0", "vk", "q", "va")}, "Koren+screen partition", "candidate_fit", "S19,S22",
-    note="fitted to RCA 6V6GT operating point; JJ sheet appears triode-connected and agrees within a few % at 150-200 V")
-add("rectifier_5Y3_forward", {"k1_mA_per_V": fits["rectifier_5Y3"]["k1_mA_per_V"], "k2_mA_per_V2": fits["rectifier_5Y3"]["k2_mA_per_V2"]}, "mA", "candidate_fit", "S20,S23")
+add("tube_6V6_pentode", {k: v[k] for k in ("mu", "ex", "kg1", "kp", "kvb", "fs0", "vk", "q", "va")}, "Koren (Kvb form) + screen partition", "candidate_fit", "S22",
+    note=("cathode-current law fitted to the digitised JJ 6V6S sheet (assumed triode-connected, Ia = plate+screen): amp region rms %.2f mA / %.1f %% relative, "
+          "positive-grid region %.1f %%; screen partition fs0 and Early voltage va come from an EXTERNAL RCA 6V6GT rating point that is NOT in the dossier; "
+          "knee shape vk, q ASSUMED") % (v["fit_amp_region"]["rms_mA"], 100 * v["fit_amp_region"]["rel_rms_above_10mA"], 100 * v["fit_positive_grid"]["rel_rms_above_10mA"]))
+g = v["grid"]
+add("tube_6V6_grid_conduction", {"a_A_per_V1p5": g["a"], "imax_A": g["imax"], "vc_V": g["vc"], "sg_V": g["sg"]}, "saturating power law", "candidate_fit", "S22",
+    note="plateau digitised from the JJ 6V6S dashed Ig curves (Ug=+5 V: %.1f mA, +20 V: %.1f mA at Ua 150-350 V); onset (vc, sg) ASSUMED; Ig dependence on plate voltage below 100 V not modelled" % (g["plateau_mA"]["5"], g["plateau_mA"]["20"]))
+y = fits["rectifier_5Y3"]
+add("rectifier_5Y3_forward", {"k1_mA_per_V": y["k1_mA_per_V"], "k2_mA_per_V2": y["k2_mA_per_V2"]}, "mA", "candidate_fit", "S23",
+    note="per-anode forward law fitted to the digitised JJ 5Y3S right panel (dashed branch is the manufacturer's extrapolation); in-circuit regulation check against the left panel: tools/validate_supply.cpp")
 
 # ---- calibration (dossier Sec. 24)
 CAL = {

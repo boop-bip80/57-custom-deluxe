@@ -128,15 +128,15 @@
    "verified_on_modern_specimen": false
   },
   "pt_hv_half_winding_rms": {
-   "value": 360.0,
+   "value": 377.4,
    "unit": "V",
    "status": "assumed",
    "source": "calibration",
    "interval": [
     330.0,
-    380.0
+    400.0
    ],
-   "note": "supply transformer parameters UNKNOWN; value calibrated so the model reproduces the documented 12.5 W at <5% THD (see validation)"
+   "note": "supply transformer parameters UNKNOWN; value CALIBRATED (cd57_validate --calibrate-pt) so the interpolated 5% THD power into 8 ohm equals the documented 12.5 W for the JJ-fitted tube laws; the anchor weakly constrains this value (see the sensitivity table in the validation report)"
   },
   "pt_series_resistance_per_half": {
    "value": 90.0,
@@ -198,14 +198,13 @@
    "value": "12AX7/12AY7 1.5-1.7/1.5-1.7/0.46-0.5 pF, 6V6 9.5/0.7/7.5 pF",
    "unit": "pF",
    "status": "assumed",
-   "source": "S08,S09,S19",
-   "note": "datasheet-class values"
+   "note": "datasheet-class values that are NOT contained in the dossier text (external, unverified offline)"
   },
-  "grid_conduction_law": {
-   "value": "I=k*(s*softplus((vgk-vc)/s))^1.5",
+  "triode_grid_conduction_law": {
+   "value": "I=k*(s*softplus((vgk-vc)/s))^1.5 (k=0.35 mA/V^1.5, vc=-0.5 V, s=0.15 V)",
    "unit": "-",
    "status": "assumed",
-   "note": "onset and slope need measurements (dossier Sec. 16)"
+   "note": "no grid-current data for the 12AY7/12AX7 in the dossier; onset and slope need measurements (dossier Sec. 16)"
   },
   "volume_pot_taper": {
    "value": null,
@@ -389,54 +388,68 @@
   },
   "tube_12AY7_koren": {
    "value": {
-    "mu": 48.61152367492053,
-    "ex": 1.1396872966957237,
-    "kg1": 528.4672857216838,
-    "kp": 260.7724157567514,
-    "kvb": 4999.9999999999945
+    "mu": 44.93368051401283,
+    "ex": 1.1080486290283051,
+    "kg1": 600.2630915260388,
+    "kp": 385.35035878475486,
+    "kvb": 3412.2231355761105
    },
    "unit": "Koren",
    "status": "candidate_fit",
-   "source": "S08,S09,S18,S21,S24",
-   "note": "fitted to digitised JJ transfer sheet + RCA anchor; rms error 0.070 mA over 40 points; no specimen curve-traced"
+   "source": "S21,S24",
+   "note": "fitted to 1313 pixel-digitised points of the JJ transfer + plate sheet; operating region (Vp 50-350 V, Vg -6..0 V): rms 0.063 mA, relative 5.1 % (tail-dominated); whole held-out curves and cross-panel prediction in data/tubes/fitted_models.json; local mu/rp/gm at the RCA point differ from the RCA numbers the dossier quotes (a JJ-vs-RCA data difference, not forced); no specimen curve-traced; grid conduction ASSUMED"
   },
   "tube_12AX7_koren": {
    "value": {
-    "mu": 110.63732696133685,
-    "ex": 1.056386655836464,
-    "kg1": 414.6903745877589,
-    "kp": 537.8463419355891,
-    "kvb": 4999.999999998192
+    "mu": 107.05670359333433,
+    "ex": 1.1223311689849467,
+    "kg1": 451.57474958310917,
+    "kp": 658.823687616927,
+    "kvb": 10403.014192917497
    },
    "unit": "Koren",
    "status": "candidate_fit",
-   "source": "S08,S09,S18,S21,S24",
-   "note": "fitted to digitised JJ transfer sheet + RCA anchor; rms error 0.077 mA over 32 points; no specimen curve-traced"
+   "source": "S21,S24",
+   "note": "fitted to 910 pixel-digitised points of the JJ transfer + plate sheet; operating region (Vp 50-350 V, Vg -6..0 V): rms 0.050 mA, relative 4.8 % (tail-dominated); whole held-out curves and cross-panel prediction in data/tubes/fitted_models.json; local mu/rp/gm at the RCA point differ from the RCA numbers the dossier quotes (a JJ-vs-RCA data difference, not forced); no specimen curve-traced; grid conduction ASSUMED"
   },
   "tube_6V6_pentode": {
    "value": {
-    "mu": 13.105645047337903,
-    "ex": 1.4000639063819529,
-    "kg1": 592.158660743239,
-    "kp": 25.040402451880542,
+    "mu": 10.197822288269602,
+    "ex": 1.2234996606450892,
+    "kg1": 428.005358095,
+    "kp": 52.01761393573592,
+    "kvb": 4698.823247886638,
     "fs0": 0.09090909090909091,
     "vk": 55.0,
     "q": 1.5,
     "va": 2340.0
    },
-   "unit": "Koren+screen partition",
+   "unit": "Koren (Kvb form) + screen partition",
    "status": "candidate_fit",
-   "source": "S19,S22",
-   "note": "fitted to RCA 6V6GT operating point; JJ sheet appears triode-connected and agrees within a few % at 150-200 V"
+   "source": "S22",
+   "note": "cathode-current law fitted to the digitised JJ 6V6S sheet (assumed triode-connected, Ia = plate+screen): amp region rms 2.67 mA / 7.1 % relative, positive-grid region 19.5 %; screen partition fs0 and Early voltage va come from an EXTERNAL RCA 6V6GT rating point that is NOT in the dossier; knee shape vk, q ASSUMED"
+  },
+  "tube_6V6_grid_conduction": {
+   "value": {
+    "a_A_per_V1p5": 0.0008258800563874394,
+    "imax_A": 0.012335515222179873,
+    "vc_V": -0.4,
+    "sg_V": 0.2
+   },
+   "unit": "saturating power law",
+   "status": "candidate_fit",
+   "source": "S22",
+   "note": "plateau digitised from the JJ 6V6S dashed Ig curves (Ug=+5 V: 7.9 mA, +20 V: 12.2 mA at Ua 150-350 V); onset (vc, sg) ASSUMED; Ig dependence on plate voltage below 100 V not modelled"
   },
   "rectifier_5Y3_forward": {
    "value": {
-    "k1_mA_per_V": 1.2805455475603387,
-    "k2_mA_per_V2": 0.014826134111256052
+    "k1_mA_per_V": 1.5371756823888232,
+    "k2_mA_per_V2": 0.008749393997917148
    },
    "unit": "mA",
    "status": "candidate_fit",
-   "source": "S20,S23"
+   "source": "S23",
+   "note": "per-anode forward law fitted to the digitised JJ 5Y3S right panel (dashed branch is the manufacturer's extrapolation); in-circuit regulation check against the left panel: tools/validate_supply.cpp"
   },
   "calibration_volts_per_full_scale_input_sample": {
    "value": 1.0,

@@ -58,7 +58,7 @@ enum class LoadMode { Speaker = 0, SpeakerPlusExt8 = 1, Dummy8 = 2, Dummy4 = 3, 
 struct AmpConfig {
     // mains / PT (all ASSUMED, dossier Sec. 28: "Supply transformer parameters" UNKNOWN)
     double mainsHz = 60.0;
-    double ptHalfVrms = 360.0;               // HV half-winding RMS at nominal line (CALIBRATED to the confirmed 12.5 W @ <5% THD spec; +-10 V)
+    double ptHalfVrms = 377.4;             // HV half-winding RMS at nominal line: CALIBRATED (cd57_validate --calibrate-pt) to the documented 12.5 W @ 5% THD; manifest interval 330-400 V
     double ptRs = 90.0;                      // per-half series resistance
     double lineScale = 1.0;                  // line voltage relative to nominal (Variac)
     RectifierType rectifier = RectifierType::Tube5Y3;

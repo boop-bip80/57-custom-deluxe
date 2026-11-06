@@ -79,17 +79,17 @@ struct Rig {
 };
 
 struct Tone { double rmsV, thd, h2dB, h3dB, peakV; };
-// analyse the last `cycles` whole cycles of y (volts) at fundamental f0
+// analyse the last `cycles` cycles of y (volts) at fundamental f0.  The window holds n = round(cycles*sr/f0) samples
+// (an exact whole number of cycles whenever cycles*sr/f0 is an integer, e.g. 40 cycles of 1 kHz at 44.1/48/96 kHz) and the
+// DFT is taken at the true f0, so a non-integer samples-per-period (44.1 kHz) cannot bias the harmonic levels.
 static Tone analyseTone(const std::vector<double>& y, double sr, double f0, int cycles)
 {
-    const int per = (int)std::round(sr / f0);
-    const int n = std::min<int>((int)y.size(), per * cycles);
+    const int n = std::min<int>((int)y.size(), (int)std::lround(cycles * sr / f0));
     const size_t start = y.size() - n;
     double h[8] = {0}, e = 0, pk = 0;
-    const double fa = sr * std::round(f0 * n / sr) / n;   // exact bin frequency
     for (int k = 1; k <= 7; ++k) {
         double c = 0, s = 0;
-        for (int i = 0; i < n; ++i) { const double w = 2 * M_PI * fa * k * i / sr; c += y[start + i] * std::cos(w); s += y[start + i] * std::sin(w); }
+        for (int i = 0; i < n; ++i) { const double w = 2 * M_PI * f0 * k * i / sr; c += y[start + i] * std::cos(w); s += y[start + i] * std::sin(w); }
         h[k] = std::sqrt(c * c + s * s) * 2.0 / n;
     }
     for (int i = 0; i < n; ++i) { e += y[start + i] * y[start + i]; pk = std::max(pk, std::fabs(y[start + i])); }
@@ -102,6 +102,35 @@ static EngineParams baseParams()
     EngineParams p; p.oversampleLog2 = 1; p.instVol = 0.5f; p.micVol = 0.0f; p.tone = 0.7f; p.jack = 1; p.load = 2; // dummy 8 ohm
     p.speakerHeating = false; p.inputCalVolts = 1.0f; p.outputRefVolts = 20.0f;
     return p;
+}
+
+// ------------------------------------------------------------------------------------------------ rated power
+// Maximum 1 kHz power into the 8 ohm dummy load with THD < 5 %.  The drive level is stepped in 4 % increments and the
+// exact 5 % crossing is interpolated (linear in P against log THD), instead of reporting the last grid point below 5 %.
+struct RatedPower { double P = 0, volume = 0, vin = 0; };
+static RatedPower ratedPowerAt5(double linePercent, const std::vector<double>& vols)
+{
+    const double f0 = 1000;
+    RatedPower best;
+    for (double vol : vols) {
+        EngineParams p = baseParams(); p.instVol = (float)vol; p.tone = 1.0f; p.linePercent = (float)linePercent;
+        Rig rig(p);
+        double pEv = 0, pThd = 0, pP = 0; bool have = false;
+        for (double ev = 0.012; ev < 0.4; ev *= 1.04) {
+            const Tone t = analyseTone(rig.run(rig.sine(f0, ev, 0.12)), rig.sr, f0, 40);
+            const double P = t.rmsV * t.rmsV / 8.0;
+            if (t.thd >= 0.05) {
+                if (have) {
+                    const double a = (std::log(0.05) - std::log(pThd)) / (std::log(t.thd) - std::log(pThd));
+                    const double Pc = pP + a * (P - pP);
+                    if (Pc > best.P) best = {Pc, vol, std::exp(std::log(pEv) + a * (std::log(ev) - std::log(pEv)))};
+                }
+                break;
+            }
+            pEv = ev; pThd = t.thd; pP = P; have = true;
+        }
+    }
+    return best;
 }
 
 // ------------------------------------------------------------------------------------------------ AC helpers
@@ -118,14 +147,30 @@ static double acGainDb(Rig& r, double f, const char* outNode, double* phaseDeg =
 
 int main(int argc, char** argv)
 {
-    bool quick = false; std::string reportPath, netlistPath;
+    bool quick = false, calibratePt = false; std::string reportPath, netlistPath;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--quick") quick = true;
         else if (a == "--report" && i + 1 < argc) reportPath = argv[++i];
         else if (a == "--netlist" && i + 1 < argc) netlistPath = argv[++i];
+        else if (a == "--calibrate-pt") calibratePt = true;
     }
     gNetlist = embeddedNetlist(); gManifest = embeddedManifest();
+    if (calibratePt) {
+        // developer tool: find the PT half-winding RMS for which the interpolated 5 %-THD power equals the rated 12.5 W
+        const std::vector<double> vols = {0.3, 0.42, 0.55};
+        Rig probe(baseParams());
+        const double ptNom = probe.e.amp().cfg.ptHalfVrms;
+        double lo = 80.0, hi = 120.0;
+        for (int it = 0; it < 14; ++it) {
+            const double mid = 0.5 * (lo + hi);
+            const double P = ratedPowerAt5(mid, vols).P;
+            std::cout << "line " << f(mid, 2) << " % -> PT " << f(ptNom * mid / 100.0, 2) << " V : P = " << f(P, 3) << " W\n";
+            (P < 12.5 ? lo : hi) = mid;
+        }
+        std::cout << "CALIBRATED pt_hv_half_winding_rms = " << f(ptNom * 0.5 * (lo + hi) / 100.0, 1) << " V RMS per half\n";
+        return 0;
+    }
     const auto t0 = std::chrono::steady_clock::now();
 
     R << "# Validation report — Fender '57 Custom Deluxe digital model\n\n";
@@ -191,25 +236,34 @@ int main(int argc, char** argv)
     }
 
     // ============================================================================================ 4. rated power / THD
-    double pAt5 = 0, vAt5 = 0, volAt5 = 0;
-    section("4. Rated output: 12.5 W into 8 Ω at <5% THD, 1 kHz (CONFIRMED spec; used as a CALIBRATION anchor)");
+    double pAt5 = 0, vAt5 = 0, volAt5 = 0;           // the interpolated 5 % THD operating point, reused by the supply power-flow section
+    section("4. Rated output: 12.5 W into 8 Ω at <5% THD, 1 kHz (CONFIRMED spec; used as a CALIBRATION anchor, not as evidence)");
     {
-        const double f0 = 1000;
-        R << "| Instrument vol | input pk | P_out | THD |\n|---|---|---|---|\n";
-        for (double vol : (quick ? std::vector<double>{0.42} : std::vector<double>{0.3, 0.42, 0.55})) {
-            EngineParams p = baseParams(); p.instVol = (float)vol; p.tone = 1.0f;
-            Rig rig(p);
-            for (double ev = 0.012; ev < 0.2; ev *= 1.1) {
-                auto y = rig.run(rig.sine(f0, ev, 0.12));
-                const Tone t = analyseTone(y, rig.sr, f0, 40);
-                const double P = t.rmsV * t.rmsV / 8.0;
-                if (t.thd < 0.05 && P > pAt5) { pAt5 = P; vAt5 = ev; volAt5 = vol; }
-                if (t.thd > 0.3) break;
+        const std::vector<double> vols = {0.3, 0.42, 0.55};
+        Rig probe(baseParams());
+        const double ptNom = probe.e.amp().cfg.ptHalfVrms;
+        const RatedPower nom = ratedPowerAt5(100.0, vols);
+        const double residual = (nom.P - 12.5) / 12.5;
+        pAt5 = nom.P; vAt5 = nom.vin; volAt5 = nom.volume;
+        R << "| quantity | value |\n|---|---|\n| power-transformer HV half-winding (assumed, calibrated) | " << f(ptNom, 1) << " V RMS |\n"
+          << "| Instrument volume at the maximum | " << f(nom.volume, 2) << " |\n| input at the 5 % THD crossing | " << f(nom.vin * 1e3, 1) << " mV pk |\n"
+          << "| P_out at exactly 5 % THD (interpolated) | " << f(nom.P, 2) << " W |\n| calibration residual vs 12.5 W | " << f(100 * residual, 1) << " % |\n\n";
+        std::cout << "  P(5% THD) = " << f(nom.P, 2) << " W at PT " << f(ptNom, 1) << " V (volume " << f(nom.volume, 2) << ")\n";
+        info("CALIBRATION RESIDUAL: P_out at the interpolated 5 % THD crossing is " + f(nom.P, 2) + " W against the rated 12.5 W (" + f(100 * residual, 1) + " %). The power-transformer secondary is NOT documented (dossier Sec. 28); " + f(ptNom, 1) + " V RMS per half was chosen so that this residual is small, so this number is a calibration, not independent evidence.");
+        check(std::fabs(residual) < 0.03, "calibration regression guard: the PT calibration still reproduces the rated 12.5 W within 3 % (guards against silent model drift; NOT evidence of a match)", f(nom.P, 2) + " W, residual " + f(100 * residual, 1) + " %");
+        if (!quick) {
+            R << "Sensitivity of the anchor to the unknown PT secondary (the manifest's own interval is 330-400 V):\n\n| PT half-winding | B+1 (idle) | P_out at 5 % THD | vs 12.5 W |\n|---|---|---|---|\n";
+            for (double pt : {330.0, 350.0, ptNom, 390.0, 400.0}) {
+                const double pct = 100.0 * pt / ptNom;
+                EngineParams q = baseParams(); q.load = 0; q.linePercent = (float)pct;
+                Rig r2(q); for (int i = 0; i < 4800; ++i) r2.e.amp().tick(0.0);
+                const double b1 = r2.e.amp().nodeV("b1");
+                const RatedPower rp = ratedPowerAt5(pct, vols);
+                R << "| " << f(pt, 0) << " V | " << f(b1, 0) << " V | " << f(rp.P, 2) << " W | " << (rp.P >= 12.5 ? "+" : "") << f(100 * (rp.P - 12.5) / 12.5, 0) << " % |\n";
             }
+            R << "\n";
+            info("the rated-power spec constrains the unknown PT secondary only weakly: 12.5 W is reached anywhere inside the interval for a suitable PT value, so the anchor cannot validate the tube or transformer models.");
         }
-        R << "| " << f(volAt5, 2) << " | " << f(vAt5 * 1e3, 1) << " mV | " << f(pAt5, 2) << " W | <5% |\n\n";
-        check(pAt5 > 11.25 && pAt5 < 13.75, "maximum power with THD < 5% is within 10% of the rated 12.5 W", f(pAt5, 2) + " W");
-        info("CALIBRATION: the assumed power-transformer secondary (360 V RMS per half) was chosen so this holds; the same value yields B+1 ~ 372 V and a 21 V shared cathode, typical of a 5E3-class unit. It is not independent evidence.");
     }
 
     // ============================================================================================ 5. AC cross-check

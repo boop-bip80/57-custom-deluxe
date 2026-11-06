@@ -57,6 +57,18 @@ if(CD57_BUILD_TOOLS)
         add_test(NAME netlist_register_checker_selftest
                  COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_netlist_against_register.py --self-test)
     endif()
+    # --- supply tests ---
+    add_executable(validate_supply tools/validate_supply.cpp)
+    target_include_directories(validate_supply PRIVATE tools)
+    target_link_libraries(validate_supply PRIVATE cd57_core)
+    target_compile_definitions(validate_supply PRIVATE CD57_DIGITIZED_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data/tubes/digitized")
+    add_test(NAME supply_regulation_vs_jj_5y3s COMMAND validate_supply)
+    # --- tube device tests ---
+    add_executable(validate_tubes tools/validate_tubes.cpp)
+    target_include_directories(validate_tubes PRIVATE tools)
+    target_link_libraries(validate_tubes PRIVATE cd57_core)
+    target_compile_definitions(validate_tubes PRIVATE CD57_DIGITIZED_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data/tubes/digitized")
+    add_test(NAME tube_device_laws COMMAND validate_tubes)
     # --- acoustic tests ---
     add_executable(validate_acoustic tools/validate_acoustic.cpp)
     target_link_libraries(validate_acoustic PRIVATE cd57_core)

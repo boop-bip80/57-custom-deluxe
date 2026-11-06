@@ -5,10 +5,13 @@
 // softplus; all derivatives are analytic and checked against finite differences in the tests.
 //
 // Parameter provenance (see data/tubes/fitted_models.json, scripts/fit_tubes.py):
-//   triodes  : Koren-form, fitted to digitised JJ transfer sheets + RCA anchor point (CANDIDATE)
-//   6V6      : Koren-form space-charge law + screen partition fitted to RCA 6V6GT operating point
-//   grid I   : ASSUMED smooth law (dossier Sec. 16: "onset and slope need measurements")
+//   triodes  : Koren form fitted to the pixel-digitised JJ transfer + plate sheets, validated on held-out curves (CANDIDATE)
+//   6V6      : cathode-current law fitted to the digitised JJ 6V6S triode-connected sheet (Kvb generalisation of Koren's
+//              pentode law); screen partition and Early voltage from an EXTERNAL RCA 6V6GT rating point (not in the dossier)
+//   grid I   : 6V6 plateau digitised from the sheet's dashed Ig curves (saturating law); onset (vc, sg) and every triode
+//              grid law ASSUMED (dossier Sec. 16: "onset and slope need measurements")
 //   rectifier: digitised 5Y3S forward curve (CANDIDATE), or silicon diode for the optional mod
+// See data/tubes/fitted_models.json for residuals, validation and provenance.
 #pragma once
 #include <cmath>
 #include <algorithm>
@@ -35,12 +38,14 @@ inline double smoothPos(double x, double eps2, double& d)
 
 // ---------------------------------------------------------------- grid conduction (ASSUMED law)
 struct GridLaw {
-    double k  = 0.35e-3;   // A / V^1.5
-    double vc = -0.5;      // V   onset offset
-    double sg = 0.15;      // V   smoothing width
+    double k    = 0.35e-3; // A / V^1.5
+    double vc   = -0.5;    // V   onset offset
+    double sg   = 0.15;    // V   smoothing width
+    double imax = 0.0;     // A   saturation current; 0 = unsaturated power law
 };
 
-// I_g = k * (sg * softplus((vgk - vc)/sg))^1.5 ; returns I_g and dI_g/dvgk
+// t = k * x^1.5 with x = sg * softplus((vgk - vc)/sg);  I_g = t / sqrt(1 + (t/imax)^2)  (imax = 0: I_g = t)
+// returns I_g and dI_g/dvgk
 inline void gridCurrent(const GridLaw& g, double vgk, double& ig, double& dig)
 {
     const double u = (vgk - g.vc) / g.sg;
@@ -49,8 +54,17 @@ inline void gridCurrent(const GridLaw& g, double vgk, double& ig, double& dig)
     softplus(u, sp, sig);
     const double x = g.sg * sp;
     const double r = std::sqrt(x);
-    ig  = g.k * x * r;
-    dig = g.k * 1.5 * r * sig;
+    const double t = g.k * x * r;
+    const double dt = g.k * 1.5 * r * sig;
+    if (g.imax > 0.0) {
+        const double q = t / g.imax;
+        const double w = 1.0 / std::sqrt(1.0 + q * q);
+        ig  = t * w;
+        dig = dt * w * w * w;
+    } else {
+        ig  = t;
+        dig = dt;
+    }
 }
 
 // ---------------------------------------------------------------- triode (Koren form)
@@ -98,7 +112,7 @@ inline void evalTriode(const TriodeParams& p, double vgk, double vpk, double em,
 
 // ---------------------------------------------------------------- beam-power pentode (6V6)
 struct PentodeParams {
-    double mu, ex, kg1, kp, fs0, vk, q, va;
+    double mu, ex, kg1, kp, kvb, fs0, vk, q, va;
     GridLaw grid;
 };
 
@@ -111,11 +125,10 @@ struct PentodeOut {
 
 inline PentodeParams pentodeParams()
 {
-    PentodeParams p{fit::k6V6.mu, fit::k6V6.ex, fit::k6V6.kg1, fit::k6V6.kp, fit::k6V6.fs0, fit::k6V6.vk,
-                    fit::k6V6.q, fit::k6V6.va, {}};
-    p.grid.k = 0.9e-3;   // power-valve grid conduction (ASSUMED)
-    p.grid.vc = -0.4;
-    p.grid.sg = 0.2;
+    const auto& f = fit::k6V6;
+    const auto& g = fit::k6V6grid;
+    PentodeParams p{f.mu, f.ex, f.kg1, f.kp, f.kvb, f.fs0, f.vk, f.q, f.va, {}};
+    p.grid.k = g.a;  p.grid.vc = g.vc;  p.grid.sg = g.sg;  p.grid.imax = g.imax;
     return p;
 }
 
@@ -125,7 +138,8 @@ inline void evalPentode(const PentodeParams& p, double vgk, double vpk, double v
     const double vs = smoothPos(vsk, 1.0, dvs);               // screen must be positive
     const double vp = smoothPos(vpk, 0.25, dvp);
     const double vsf = std::max(vs, 1e-3);
-    const double u = p.kp * (1.0 / p.mu + vgk / vsf);
+    const double sc  = std::sqrt(p.kvb + vsf * vsf);               // controlling voltage: the current vanishes as Vs -> 0
+    const double u = p.kp * (1.0 / p.mu + vgk / sc);
     double L, sg;
     softplus(u, L, sg);
     double e1 = (vsf / p.kp) * L;
@@ -133,8 +147,8 @@ inline void evalPentode(const PentodeParams& p, double vgk, double vpk, double v
     const double e1pow = std::pow(e1, p.ex - 1.0);
     const double ik = e1pow * e1 / p.kg1;
     const double dik_de1 = p.ex * e1pow / p.kg1;
-    const double de1_dvgk = sg;
-    const double de1_dvsf = L / p.kp - sg * vgk / vsf;
+    const double de1_dvgk = vsf * sg / sc;
+    const double de1_dvsf = L / p.kp - vsf * sg * vgk * vsf / (sc * sc * sc);
     const double dik_dvgk = dik_de1 * de1_dvgk;
     const double dik_dvs = dik_de1 * de1_dvsf * dvs;
 
@@ -150,7 +164,9 @@ inline void evalPentode(const PentodeParams& p, double vgk, double vpk, double v
     }
     const double fs = p.fs0 + (1.0 - p.fs0) * ex_;
     const double dfs = (1.0 - p.fs0) * dex_;
-    const double early = 1.0 + vp / p.va;
+    // plate-voltage dependence relative to the screen: the factor is exactly 1 at Vp = Vs, so a screen strapped to the plate
+    // (the JJ sheet's triode connection) gives Ip + Is = Ik; its slope dIp/dVp = Ik(1-fs)/Va is what the rp anchor sets
+    const double early = 1.0 + (vpk - vsk) / p.va;               // raw terminal voltages: linear, needs no smoothing
 
     o.ip = em * ik * (1.0 - fs) * early;
     o.is = em * ik * fs;
@@ -158,10 +174,10 @@ inline void evalPentode(const PentodeParams& p, double vgk, double vpk, double v
     o.dip[0] = em * dik_dvgk * (1.0 - fs) * early;
     o.dis[0] = em * dik_dvgk * fs;
     // d/d vpk
-    o.dip[1] = em * ik * (-dfs * early + (1.0 - fs) / p.va) * dvp;
+    o.dip[1] = em * ik * (-dfs * dvp * early + (1.0 - fs) / p.va);
     o.dis[1] = em * ik * dfs * dvp;
     // d/d vsk
-    o.dip[2] = em * dik_dvs * (1.0 - fs) * early;
+    o.dip[2] = em * (dik_dvs * (1.0 - fs) * early - ik * (1.0 - fs) / p.va);
     o.dis[2] = em * dik_dvs * fs;
 
     double ig, dig;

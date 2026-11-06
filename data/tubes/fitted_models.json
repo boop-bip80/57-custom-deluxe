@@ -1,67 +1,289 @@
 {
   "note": "Candidate constitutive-model parameters for a nominal public-source model. NOT measured on a specimen.",
+  "method": "scripts/digitize_jj_sheets.py -> data/tubes/digitized/*.csv ; scripts/fit_tubes.py (Sec. 16 objective, held-out validation)",
   "triode_koren": {
     "12AY7": {
-      "mu": 48.61152367492053,
-      "ex": 1.1396872966957237,
-      "kg1": 528.4672857216838,
-      "kp": 260.7724157567514,
-      "kvb": 4999.9999999999945,
-      "rms_mA": 0.07007620191036468,
-      "max_mA": 0.18168380140717666,
-      "rel_rms": 0.04538890893981952,
-      "n_points": 40,
-      "anchor": {
-        "ua": 250,
-        "ug": -4,
-        "ip_mA": 3.037792945057479,
-        "gm_mS": 1.7462428549958313,
-        "rp_kohm": 25.176993569226276,
-        "mu_local": 43.96514513053738
-      }
+      "mu": 44.93368051401283,
+      "ex": 1.1080486290283051,
+      "kg1": 600.2630915260388,
+      "kp": 385.35035878475486,
+      "kvb": 3412.2231355761105,
+      "weights": "1.0 inside the operating region, 0.3 outside",
+      "n_points": 1313,
+      "fit_all": {
+        "n": 1313,
+        "rms_mA": 0.06786440272253975,
+        "max_mA": 0.21154077658136589,
+        "rel_rms": 0.07165664354399129
+      },
+      "fit_operating_region": {
+        "n": 851,
+        "rms_mA": 0.06283296896281856,
+        "max_mA": 0.1962567013065346,
+        "rel_rms": 0.0511291438434642
+      },
+      "fit_outside_region": {
+        "n": 462,
+        "rms_mA": 0.07626835361573739,
+        "max_mA": 0.21154077658136589,
+        "rel_rms": 0.17339389778541395
+      },
+      "cross_panel": {
+        "plate_to_transfer": {
+          "n": 420,
+          "rms_mA": 0.07828131830583171,
+          "max_mA": 0.22981637168213442,
+          "rel_rms": 0.08482673490719699
+        },
+        "transfer_to_plate": {
+          "n": 893,
+          "rms_mA": 0.16366335582791727,
+          "max_mA": 0.44508337279472177,
+          "rel_rms": 0.2145493098201905
+        },
+        "plate_to_transfer_in_region": {
+          "n": 394,
+          "rms_mA": 0.07246043145118466,
+          "max_mA": 0.22981637168213442,
+          "rel_rms": 0.06785895120333996
+        },
+        "transfer_to_plate_in_region": {
+          "n": 457,
+          "rms_mA": 0.058185010065798654,
+          "max_mA": 0.15113020663486898,
+          "rel_rms": 0.03868437597291462
+        }
+      },
+      "held_out_curves": {
+        "curves": [
+          "transfer:200.0",
+          "plate:-3.0"
+        ],
+        "held_out": {
+          "n": 140,
+          "rms_mA": 0.07676552663601433,
+          "max_mA": 0.13099562009949572,
+          "rel_rms": 0.06473910153817089
+        },
+        "trained": {
+          "n": 1173,
+          "rms_mA": 0.06733855388643988,
+          "max_mA": 0.20672161990985455,
+          "rel_rms": 0.07344293993077113
+        },
+        "params": [
+          44.80994586101276,
+          1.1021774783886147,
+          598.0624036883114,
+          393.9199878215953,
+          3260.771328420954
+        ]
+      },
+      "local_at_rca_point": {
+        "vp": 250.0,
+        "vg": -4.0,
+        "ip_mA": 3.0313224014139184,
+        "gm_mS": 1.7703575191334586,
+        "rp_kohm": 24.817140132409065,
+        "mu": 43.935210636799106,
+        "rca_dossier": {
+          "vp": 250.0,
+          "vg": -4.0,
+          "ip": 3.0,
+          "gm": 1.75,
+          "rp": 22.8,
+          "mu": 40
+        }
+      },
+      "evidence": "DIGITIZED (JJ sheet) fit; grid conduction is ASSUMED (no grid-current data for this tube)"
     },
     "12AX7": {
-      "mu": 110.63732696133685,
-      "ex": 1.056386655836464,
-      "kg1": 414.6903745877589,
-      "kp": 537.8463419355891,
-      "kvb": 4999.999999998192,
-      "rms_mA": 0.0771884579723208,
-      "max_mA": 0.21933780879497977,
-      "rel_rms": 0.09051954240753425,
-      "n_points": 32,
-      "anchor": {
-        "ua": 250,
-        "ug": -2,
-        "ip_mA": 1.2068966986803906,
-        "gm_mS": 1.589445324087801,
-        "rp_kohm": 59.264639012665114,
-        "mu_local": 94.19790336243203
-      }
+      "mu": 107.05670359333433,
+      "ex": 1.1223311689849467,
+      "kg1": 451.57474958310917,
+      "kp": 658.823687616927,
+      "kvb": 10403.014192917497,
+      "weights": "1.0 inside the operating region, 0.3 outside",
+      "n_points": 910,
+      "fit_all": {
+        "n": 910,
+        "rms_mA": 0.05511837919518009,
+        "max_mA": 0.22228775215965452,
+        "rel_rms": 0.06731150265937562
+      },
+      "fit_operating_region": {
+        "n": 826,
+        "rms_mA": 0.050164585891550255,
+        "max_mA": 0.19936752711622174,
+        "rel_rms": 0.048159042730950744
+      },
+      "fit_outside_region": {
+        "n": 84,
+        "rms_mA": 0.09036930447628533,
+        "max_mA": 0.22228775215965452,
+        "rel_rms": 0.16490482925672753
+      },
+      "cross_panel": {
+        "plate_to_transfer": {
+          "n": 280,
+          "rms_mA": 0.09367710066402447,
+          "max_mA": 0.3346641103584158,
+          "rel_rms": 0.06746367330722904
+        },
+        "transfer_to_plate": {
+          "n": 630,
+          "rms_mA": 0.07311823550132353,
+          "max_mA": 0.2565109017106654,
+          "rel_rms": 0.11835657156904499
+        },
+        "plate_to_transfer_in_region": {
+          "n": 278,
+          "rms_mA": 0.09181702316588057,
+          "max_mA": 0.31821719943777804,
+          "rel_rms": 0.06764266540277325
+        },
+        "transfer_to_plate_in_region": {
+          "n": 548,
+          "rms_mA": 0.06367228737036174,
+          "max_mA": 0.24009571985802391,
+          "rel_rms": 0.06988076116798757
+        }
+      },
+      "held_out_curves": {
+        "curves": [
+          "transfer:150.0",
+          "plate:-1.5"
+        ],
+        "held_out": {
+          "n": 140,
+          "rms_mA": 0.07173631366545402,
+          "max_mA": 0.1661841085343181,
+          "rel_rms": 0.07718636169531848
+        },
+        "trained": {
+          "n": 770,
+          "rms_mA": 0.052573307846206896,
+          "max_mA": 0.23564779712705253,
+          "rel_rms": 0.0662562559342998
+        },
+        "params": [
+          107.10502369196276,
+          1.1020276474320796,
+          445.62609526340526,
+          671.6197962170629,
+          9853.722698538411
+        ]
+      },
+      "local_at_rca_point": {
+        "vp": 250.0,
+        "vg": -2.0,
+        "ip_mA": 1.1946103290759866,
+        "gm_mS": 1.6812053565430363,
+        "rp_kohm": 59.19464824920145,
+        "mu": 99.51835971523833,
+        "rca_dossier": {
+          "vp": 250.0,
+          "vg": -2.0,
+          "ip": 1.2,
+          "gm": 1.6,
+          "rp": 62.5,
+          "mu": 100
+        }
+      },
+      "evidence": "DIGITIZED (JJ sheet) fit; grid conduction is ASSUMED (no grid-current data for this tube)"
     }
   },
   "pentode_6V6": {
-    "mu": 13.105645047337903,
-    "ex": 1.4000639063819529,
-    "kg1": 592.158660743239,
-    "kp": 25.040402451880542,
+    "mu": 10.197822288269602,
+    "ex": 1.2234996606450892,
+    "kg1": 428.005358095,
+    "kp": 52.01761393573592,
+    "kvb": 4698.823247886638,
     "fs0": 0.09090909090909091,
     "vk": 55.0,
     "q": 1.5,
     "va": 2340.0,
-    "anchor": {
-      "ip_mA": 47.17369472370465,
-      "ig2_mA": 4.2649243614861545,
-      "gm_mS": 4.052262034408977,
-      "rp_kohm": 54.396845026457676
+    "grid": {
+      "a": 0.0008258800563874394,
+      "imax": 0.012335515222179873,
+      "vc": -0.4,
+      "sg": 0.2,
+      "plateau_mA": {
+        "20": 12.176565573770493,
+        "5": 7.934866666666666
+      }
     },
-    "jj_triode_connected_ratio_mean": 0.7579905934012958,
-    "jj_triode_connected_ratio_spread": 0.22685449537673652
+    "n_points": 840,
+    "fit_all": {
+      "n": 840,
+      "rms_mA": 3.4480870390817637,
+      "max_mA": 13.01026969981758,
+      "rel_rms_above_10mA": 0.11204466552867909
+    },
+    "fit_visited_region": {
+      "n": 625,
+      "rms_mA": 2.3532890634078036,
+      "max_mA": 10.592731640632863,
+      "rel_rms_above_10mA": 0.07510930851366351
+    },
+    "fit_amp_region": {
+      "n": 348,
+      "rms_mA": 2.6699617552007693,
+      "max_mA": 10.592731640632863,
+      "rel_rms_above_10mA": 0.07096708610861052
+    },
+    "fit_positive_grid": {
+      "n": 140,
+      "rms_mA": 6.790871647762085,
+      "max_mA": 13.01026969981758,
+      "rel_rms_above_10mA": 0.19521203942680376
+    },
+    "cross_panel": {
+      "plate_to_transfer": {
+        "n": 280,
+        "rms_mA": 2.6581479872394596,
+        "max_mA": 5.527719274632304,
+        "rel_rms_above_10mA": 0.12715500347727718
+      },
+      "transfer_to_plate": {
+        "n": 560,
+        "rms_mA": 8.309342580384982,
+        "max_mA": 20.198154534706816,
+        "rel_rms_above_10mA": 0.30434276559444
+      }
+    },
+    "held_out_curves": {
+      "held_out": {
+        "n": 140,
+        "rms_mA": 1.7617595550505343,
+        "max_mA": 3.2238798341672634,
+        "rel_rms_above_10mA": 0.05327854196028044
+      },
+      "trained": {
+        "n": 700,
+        "rms_mA": 3.3264633989599948,
+        "max_mA": 12.066911216892308,
+        "rel_rms_above_10mA": 0.10722501565873711
+      },
+      "curves": [
+        "plate:Ug=-20V",
+        "transfer:Ua=100V"
+      ]
+    },
+    "consistency_external_rca": {
+      "model_ik_mA": 52.905863855583895,
+      "model_dik_dvg_mS": 4.535102950605108,
+      "rca_ip_plus_ig2_mA": 49.5,
+      "rca_gm_mS": 4.1
+    },
+    "evidence": "cathode-current law: DIGITIZED (JJ 6V6S sheet, assumed triode-connected: Ia = plate+screen current); grid current plateau: DIGITIZED (dashed Ig curves); grid onset (vc, sg): ASSUMED; screen partition fs0 and Early voltage va: EXTERNAL anchor (RCA 6V6GT rating point, not in the dossier); knee shape vk, q: ASSUMED"
   },
   "rectifier_5Y3": {
-    "k1_mA_per_V": 1.2805455475603387,
-    "k2_mA_per_V2": 0.014826134111256052,
-    "source": "S23 right panel, digitized",
-    "n_points": 10
+    "k1_mA_per_V": 1.5371756823888232,
+    "k2_mA_per_V2": 0.008749393997917148,
+    "n_points": 120,
+    "rel_rms_solid": 0.054365653881788274,
+    "rel_rms_dashed": 0.07154768886046875,
+    "evidence": "DIGITIZED (JJ 5Y3S right panel); dashed branch weighted 0.35; in-circuit regulation check: tools/validate_supply.cpp"
   }
 }
