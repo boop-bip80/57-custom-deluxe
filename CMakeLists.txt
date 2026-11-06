@@ -48,6 +48,7 @@ if(CD57_BUILD_TOOLS)
     add_custom_target(regen_lu_kernel COMMAND cd57_gen_lu ${CD57_NETLIST} ${CMAKE_CURRENT_SOURCE_DIR}/generated/LuKernel.h
         DEPENDS cd57_gen_lu COMMENT "Regenerating generated/LuKernel.h" VERBATIM)
     enable_testing()
+    find_package(Threads REQUIRED)
     add_test(NAME dossier_validation COMMAND cd57_validate --quick --report ${CMAKE_CURRENT_BINARY_DIR}/validation_quick.md)
     # --- netlist register tests ---
     find_program(CD57_PYTHON NAMES python3 python)
@@ -89,9 +90,34 @@ if(CD57_BUILD_TOOLS)
     add_executable(validate_acoustic tools/validate_acoustic.cpp)
     target_link_libraries(validate_acoustic PRIVATE cd57_core)
     add_test(NAME acoustic_validation COMMAND validate_acoustic)
+    # --- Sec. 26 metric library: self-test against analytic answers ---
+    add_library(cd57_analysis INTERFACE)
+    target_include_directories(cd57_analysis INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/analysis)
+    target_compile_features(cd57_analysis INTERFACE cxx_std_17)
+    add_executable(validate_metrics tools/validate_metrics.cpp)
+    target_link_libraries(validate_metrics PRIVATE cd57_analysis)
+    add_test(NAME metrics_selftest COMMAND validate_metrics)
+    # --- capture programme (Sec. 25): render the capture matrix through the model; the same harness scores a hardware dataset ---
+    add_executable(cd57_capture_matrix tools/cd57_capture_matrix.cpp)
+    target_include_directories(cd57_capture_matrix PRIVATE tools)
+    target_link_libraries(cd57_capture_matrix PRIVATE cd57_core cd57_analysis Threads::Threads)
+    add_executable(cd57_conduction tools/cd57_conduction.cpp)
+    target_include_directories(cd57_conduction PRIVATE tools)
+    target_link_libraries(cd57_conduction PRIVATE cd57_core cd57_analysis)
+    add_test(NAME valve_conduction_consistency COMMAND cd57_conduction --report ${CMAKE_CURRENT_BINARY_DIR}/conduction.md)
+    add_executable(cd57_compare tools/cd57_compare.cpp)
+    target_include_directories(cd57_compare PRIVATE tools src/dsp)
+    target_link_libraries(cd57_compare PRIVATE cd57_core cd57_analysis)
+    if(CD57_PYTHON)
+        add_test(NAME capture_compare_selfcheck
+                 COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_compare.py --capture $<TARGET_FILE:cd57_capture_matrix>
+                         --compare $<TARGET_FILE:cd57_compare> --tmp ${CMAKE_CURRENT_BINARY_DIR}/compare_selfcheck)
+        add_test(NAME capture_matrix_quick
+                 COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_capture_matrix.py --exe $<TARGET_FILE:cd57_capture_matrix>
+                         --tmp ${CMAKE_CURRENT_BINARY_DIR}/capture_quick)
+    endif()
     # --- numerics tests ---
     add_executable(validate_numerics tools/validate_numerics.cpp)
-    find_package(Threads REQUIRED)
     target_link_libraries(validate_numerics PRIVATE cd57_core Threads::Threads)
     add_test(NAME numerics_validation COMMAND validate_numerics --quick --report ${CMAKE_CURRENT_BINARY_DIR}/numerics_quick.md)
 endif()

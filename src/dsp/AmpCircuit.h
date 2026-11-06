@@ -64,6 +64,14 @@ struct AmpConfig {
     RectifierType rectifier = RectifierType::Tube5Y3;
     std::string v1Type = "12AY7", v2Type = "12AX7";
     bool otSaturation = false;               // optional lab feature: ASSUMED output-transformer saturation law (default OFF, dossier Sec. 12/29)
+    // output transformer, driven by the parameter manifest (dossier Sec. 30: the manifest is the machine-readable source of truth).  NaN = keep the
+    // netlist value.  All are referred as the manifest entry names say; the netlist split between windings is kept in proportion.
+    double otRatioFull = std::nan("");       // full-primary turns ratio n = N_full / N_secondary (= sqrt(Zp / Zs))
+    double otLprimFull = std::nan("");       // H, small-signal magnetising inductance of the full primary, secondary open:  N_full^2 (P0 + Pair)
+    double otLeakFullRef = std::nan("");     // H, total leakage referred to the full primary:  Lla + Llb + n^2 Lls
+    double otDcrPrimHalf = std::nan("");     // ohm, DC resistance of ONE primary half
+    double otDcrSec = std::nan("");          // ohm
+    double otSatFlux = std::nan("");         // V*s per secondary turn (used only when the optional saturation law is switched on)
     double potTotal = 1.0e6;
     PotMap volumeMap, toneMap;
     SpeakerTS speaker;
@@ -297,6 +305,7 @@ private:
         R_re_ = n.resId("Re"); R_dum_ = n.resId("Rdum"); R_ext_ = n.resId("Rext");
         L_le_ = n.indId("Le"); R_es_ = n.resId("Res"); C_mes_ = n.capId("Cmes"); L_ces_ = n.indId("Lces");
         R_k1_ = n.resId("Rk1");
+        if (n.hasXfm()) xfmNominal_ = n.xfm();
     }
 
     void applyConfig()
@@ -320,6 +329,7 @@ private:
         srcG_ = 1.0 / n.getR(R_src_);
         n.setR(n.resId("Rs_a"), cfg.ptRs); n.setR(n.resId("Rs_b"), cfg.ptRs);
         n.setCoreSaturation(cfg.otSaturation);
+        applyTransformerConfig();
         if (cfg.mainsHz < 40.0) cfg.mainsHz = 50.0;
         // speaker electrical equivalent (dossier Sec. 17)
         const SpeakerTS& s = cfg.speaker;
@@ -350,6 +360,30 @@ private:
         noiseRng_.seed(cfg.noiseSeed);
     }
 
+    // Output-transformer parameters from the manifest.  Always recomputed from the NOMINAL netlist record, so repeated reconfiguration never compounds.
+    // Order matters: ratio first (it changes N_full), then magnetising inductance (P0 = L / N_full^2 - Pair), leakage (all three windings scaled in
+    // proportion so that Lla + Llb + n^2 Lls equals the target), then DC resistances and the saturation flux.
+    void applyTransformerConfig()
+    {
+        Network& n = *net_;
+        if (!n.hasXfm()) return;
+        Network::Xfm& x = n.xfm();
+        const Network::Xfm& nom = xfmNominal_;
+        x.N[0] = nom.N[0]; x.N[1] = nom.N[1]; x.N[2] = nom.N[2]; x.P0 = nom.P0; x.Pair = nom.Pair; x.phiSat = nom.phiSat;
+        for (int k = 0; k < 3; ++k) { x.Ll[k] = nom.Ll[k]; x.R[k] = nom.R[k]; }
+        if (std::isfinite(cfg.otRatioFull) && cfg.otRatioFull > 0.0) { x.N[0] = x.N[1] = 0.5 * cfg.otRatioFull * x.N[2]; }
+        const double Nfull = x.N[0] + x.N[1], nn = Nfull / x.N[2];
+        if (std::isfinite(cfg.otLprimFull) && cfg.otLprimFull > 0.0) x.P0 = std::max(cfg.otLprimFull / (Nfull * Nfull) - x.Pair, 1e-9);
+        if (std::isfinite(cfg.otLeakFullRef) && cfg.otLeakFullRef > 0.0) {
+            const double cur = x.Ll[0] + x.Ll[1] + nn * nn * x.Ll[2], f = cfg.otLeakFullRef / cur;
+            for (int k = 0; k < 3; ++k) x.Ll[k] *= f;
+        }
+        if (std::isfinite(cfg.otDcrPrimHalf) && cfg.otDcrPrimHalf > 0.0) x.R[0] = x.R[1] = cfg.otDcrPrimHalf;
+        if (std::isfinite(cfg.otDcrSec) && cfg.otDcrSec > 0.0) x.R[2] = cfg.otDcrSec;
+        if (std::isfinite(cfg.otSatFlux) && cfg.otSatFlux > 0.0) x.phiSat = cfg.otSatFlux;
+        n.markDirty();
+    }
+
     void updatePowerEnvelope()
     {
         // switch contact: ~10 ms ramp ; heater emission follows with its own time constants (PROPOSED)
@@ -366,6 +400,7 @@ private:
     double gauss_() { return nd_(noiseRng_); }
 
     std::unique_ptr<Network> net_;
+    Network::Xfm xfmNominal_{};
     bool useKernel_ = true;
     double fsInt_ = 96000, theta_ = 0.5, phase_ = 0.0;
     AmpControls target_, cur_;

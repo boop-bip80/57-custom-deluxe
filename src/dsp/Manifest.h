@@ -88,6 +88,12 @@ public:
     {
         c.ptHalfVrms = value("pt_hv_half_winding_rms", c.ptHalfVrms);
         c.ptRs = value("pt_series_resistance_per_half", c.ptRs);
+        c.otRatioFull = value("ot_turns_ratio_full_primary", c.otRatioFull);
+        c.otLprimFull = value("ot_primary_inductance_full", c.otLprimFull);
+        c.otLeakFullRef = value("ot_leakage_inductance_full_ref", c.otLeakFullRef);
+        c.otDcrPrimHalf = value("ot_dcr_primary_half", c.otDcrPrimHalf);
+        c.otDcrSec = value("ot_dcr_secondary", c.otDcrSec);
+        c.otSatFlux = value("ot_core_saturation_flux_per_secondary_turn", c.otSatFlux);
         c.potTotal = value("pot_total_resistance", c.potTotal);
         c.volumeMap.endpointResistance = value("pot_endpoint_contact_resistance", c.volumeMap.endpointResistance);
         c.toneMap.endpointResistance = c.volumeMap.endpointResistance;

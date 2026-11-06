@@ -192,6 +192,26 @@ int main(int argc, char** argv)
         info(std::to_string(man.readKeys().size()) + " of " + std::to_string(man.entries.size()) + " manifest entries are read by the model; the other " + std::to_string(un.size()) +
              " DOCUMENT values that live elsewhere (the netlist, generated/TubeFits.h, plugin controls) or are unknown/unmodelled: " + names);
     }
+    {   // The manifest DRIVES the output transformer (ratio, magnetising and leakage inductance, DC resistances, saturation flux).  At the shipped values it
+        // must reproduce the netlist's own numbers (the two cannot disagree silently), and changing a manifest value must change the circuit.
+        AmpCircuit a, b; a.loadNetlist(gNetlist); b.loadNetlist(gNetlist);
+        man.apply(a.cfg); a.prepare(96000.0, 0.5); b.prepare(96000.0, 0.5);
+        const auto& xa = a.network().xfm(); const auto& xb = b.network().xfm();
+        double worst = 0; auto cmp = [&](double u, double v) { worst = std::max(worst, std::fabs(u - v) / std::max(std::fabs(v), 1e-30)); };
+        for (int k = 0; k < 3; ++k) { cmp(xa.N[k], xb.N[k]); cmp(xa.R[k], xb.R[k]); cmp(xa.Ll[k], xb.Ll[k]); }
+        cmp(xa.P0, xb.P0); cmp(xa.Pair, xb.Pair); cmp(xa.phiSat, xb.phiSat);
+        check(worst < 1e-6, "manifest-driven output-transformer values equal the netlist's own numbers at the shipped values (single source of truth)", "worst relative difference " + f(worst, 9));
+        AmpConfig alt; man.apply(alt); alt.otLprimFull = 10.0; alt.otDcrPrimHalf = 200.0; alt.otLeakFullRef = 0.08;
+        AmpCircuit c; c.loadNetlist(gNetlist); c.cfg = alt; c.prepare(96000.0, 0.5);
+        const auto& xc = c.network().xfm();
+        const double Lfull = std::pow(xc.N[0] + xc.N[1], 2) * (xc.P0 + xc.Pair), Lleak = xc.Ll[0] + xc.Ll[1] + std::pow((xc.N[0] + xc.N[1]) / xc.N[2], 2) * xc.Ll[2];
+        check(std::fabs(Lfull - 10.0) < 1e-6 && std::fabs(xc.R[0] - 200.0) < 1e-9 && std::fabs(xc.R[1] - 200.0) < 1e-9 && std::fabs(Lleak - 0.08) < 1e-9,
+              "changing the manifest's magnetising inductance, leakage and primary DCR changes the circuit exactly as stated", "L_full " + f(Lfull, 4) + " H, leakage " + f(Lleak, 5) + " H, Ra " + f(xc.R[0], 2) + " ohm");
+        // reconfiguring repeatedly must not compound the scaling
+        c.reconfigure(); c.reconfigure();
+        const double Lleak2 = c.network().xfm().Ll[0] + c.network().xfm().Ll[1] + std::pow((c.network().xfm().N[0] + c.network().xfm().N[1]) / c.network().xfm().N[2], 2) * c.network().xfm().Ll[2];
+        check(std::fabs(Lleak2 - 0.08) < 1e-9, "repeated reconfiguration does not compound the transformer scaling", "leakage after 2 more reconfigurations " + f(Lleak2, 6) + " H");
+    }
     { Network n; n.parse(gNetlist); n.build(1.0 / 96000, 0.5);
       info("netlist '" + n.title + "' rev " + n.revision + ": " + std::to_string(n.nodeCount()) + " nodes, " + std::to_string(n.unknowns()) + " unknowns, sparse LU " + std::to_string(n.luOps()) + " multiply-subtract ops, " + std::to_string(n.luNnz()) + " nonzeros");
       if (!netlistPath.empty()) {

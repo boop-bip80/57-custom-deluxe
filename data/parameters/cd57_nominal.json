@@ -120,11 +120,11 @@
    "verified_on_modern_specimen": false
   },
   "ot_turns_ratio_full_primary": {
-   "value": 31.6228,
+   "value": 31.6227766,
    "unit": "ratio",
    "status": "historical_nominal",
    "source": "S10",
-   "note": "FTDO-59 8k:8 class; identity with modern OEM part unproven",
+   "note": "DRIVES THE MODEL: full-primary : secondary turns ratio, sqrt(8000/8) (dossier Sec. 12 prints 31.6228); FTDO-59 8k:8 class, identity with the modern OEM part unproven",
    "verified_on_modern_specimen": false
   },
   "pt_hv_half_winding_rms": {
@@ -149,13 +149,14 @@
    "note": "PT secondary + reflected primary resistance"
   },
   "ot_primary_inductance_full": {
-   "value": 25.0,
+   "value": 25.5,
    "unit": "H",
    "status": "assumed",
    "interval": [
     10.0,
     60.0
-   ]
+   ],
+   "note": "DRIVES THE MODEL: small-signal magnetising inductance of the full primary, secondary open, = N_full^2 (P0 + Pair) with the netlist's Pair = 0.5 mH (so the netlist's P0 = 25 mH <-> 25.5 H); value is a guess, not a measurement"
   },
   "ot_leakage_inductance_full_ref": {
    "value": 0.04,
@@ -164,7 +165,8 @@
    "interval": [
     0.01,
     0.08
-   ]
+   ],
+   "note": "DRIVES THE MODEL: total leakage referred to the full primary = Lla + Llb + n^2 Lls; the netlist's split between windings is kept in proportion"
   },
   "ot_dcr_primary_half": {
    "value": 125.0,
@@ -173,7 +175,8 @@
    "interval": [
     80.0,
     200.0
-   ]
+   ],
+   "note": "DRIVES THE MODEL: DC resistance of one primary half (Ra = Rb)"
   },
   "ot_dcr_secondary": {
    "value": 0.35,
@@ -182,7 +185,8 @@
    "interval": [
     0.2,
     0.6
-   ]
+   ],
+   "note": "DRIVES THE MODEL"
   },
   "ot_core_saturation_flux_per_secondary_turn": {
    "value": 0.06,

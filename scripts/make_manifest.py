@@ -45,16 +45,16 @@ add("rated_output_peak_voltage_sine", 14.142, "V", "derived", "S01")
 # ---- HISTORICAL circuit values are carried in data/netlist/cd57_nominal.net with per-element evidence tags
 add("netlist", "data/netlist/cd57_nominal.net", "-", "historical_nominal", "S03,S05",
     note="topology and component values are the historical 5E3 baseline; modern service schematic not authenticated (dossier Sec. 04)", verified=False)
-add("ot_turns_ratio_full_primary", 31.6228, "ratio", "historical_nominal", "S10", note="FTDO-59 8k:8 class; identity with modern OEM part unproven", verified=False)
+add("ot_turns_ratio_full_primary", 31.6227766, "ratio", "historical_nominal", "S10", note="DRIVES THE MODEL: full-primary : secondary turns ratio, sqrt(8000/8) (dossier Sec. 12 prints 31.6228); FTDO-59 8k:8 class, identity with the modern OEM part unproven", verified=False)
 
 # ---- ASSUMED (explicit assumption + sensitivity interval, dossier Sec. 28)
 add("pt_hv_half_winding_rms", 377.4, "V", "assumed", "calibration", [330.0, 400.0],
     note="supply transformer parameters UNKNOWN; value CALIBRATED (cd57_validate --calibrate-pt) so the interpolated 5% THD power into 8 ohm equals the documented 12.5 W for the JJ-fitted tube laws; the anchor weakly constrains this value (see the sensitivity table in the validation report)")
 add("pt_series_resistance_per_half", 90.0, "ohm", "assumed", None, [50.0, 150.0], note="PT secondary + reflected primary resistance")
-add("ot_primary_inductance_full", 25.0, "H", "assumed", None, [10.0, 60.0])
-add("ot_leakage_inductance_full_ref", 0.040, "H", "assumed", None, [0.01, 0.08])
-add("ot_dcr_primary_half", 125.0, "ohm", "assumed", None, [80.0, 200.0])
-add("ot_dcr_secondary", 0.35, "ohm", "assumed", None, [0.2, 0.6])
+add("ot_primary_inductance_full", 25.5, "H", "assumed", None, [10.0, 60.0], note="DRIVES THE MODEL: small-signal magnetising inductance of the full primary, secondary open, = N_full^2 (P0 + Pair) with the netlist's Pair = 0.5 mH (so the netlist's P0 = 25 mH <-> 25.5 H); value is a guess, not a measurement")
+add("ot_leakage_inductance_full_ref", 0.040, "H", "assumed", None, [0.01, 0.08], note="DRIVES THE MODEL: total leakage referred to the full primary = Lla + Llb + n^2 Lls; the netlist's split between windings is kept in proportion")
+add("ot_dcr_primary_half", 125.0, "ohm", "assumed", None, [80.0, 200.0], note="DRIVES THE MODEL: DC resistance of one primary half (Ra = Rb)")
+add("ot_dcr_secondary", 0.35, "ohm", "assumed", None, [0.2, 0.6], note="DRIVES THE MODEL")
 add("ot_core_saturation_flux_per_secondary_turn", 0.060, "V*s", "assumed", None, [0.04, 0.09], note="no public saturation data (dossier Sec. 12)")
 add("tube_interelectrode_capacitances", "12AX7/12AY7 1.5-1.7/1.5-1.7/0.46-0.5 pF, 6V6 9.5/0.7/7.5 pF", "pF", "assumed", None, note="datasheet-class values that are NOT contained in the dossier text (external, unverified offline)")
 add("triode_grid_conduction_law", "I=k*(s*softplus((vgk-vc)/s))^1.5 (k=0.35 mA/V^1.5, vc=-0.5 V, s=0.15 V)", "-", "assumed", None, note="no grid-current data for the 12AY7/12AX7 in the dossier; onset and slope need measurements (dossier Sec. 16)")

@@ -90,11 +90,11 @@ public:
         maxBlock_ = maxBlock;
         params_ = p;
         netlist_ = netlistText;
-        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_);
+        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_); osCur_.prepare(p.oversampleLog2, sr_);
         const int F = os_.factor();
         inD_.assign(maxBlock, 0.0); upD_.assign((size_t)maxBlock * F, 0.0);
-        vt_.assign((size_t)maxBlock * F, 0.0); vc_.assign((size_t)maxBlock * F, 0.0);
-        vtB_.assign(maxBlock, 0.0); vcB_.assign(maxBlock, 0.0);
+        vt_.assign((size_t)maxBlock * F, 0.0); vc_.assign((size_t)maxBlock * F, 0.0); ic_.assign((size_t)maxBlock * F, 0.0);
+        vtB_.assign(maxBlock, 0.0); vcB_.assign(maxBlock, 0.0); icB_.assign(maxBlock, 0.0);
         build(p);
     }
 
@@ -102,7 +102,7 @@ public:
     void build(const EngineParams& p)
     {
         params_ = p;
-        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_);
+        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_); osCur_.prepare(p.oversampleLog2, sr_);
         amp_.cfg = makeConfig(p);
         amp_.loadNetlist(netlist_);
         const double fsInt = sr_ * os_.factor();
@@ -119,7 +119,7 @@ public:
         applied_ = p;
         const int F = os_.factor();
         if ((size_t)maxBlock_ * F != upD_.size()) {
-            upD_.assign((size_t)maxBlock_ * F, 0.0); vt_.assign((size_t)maxBlock_ * F, 0.0); vc_.assign((size_t)maxBlock_ * F, 0.0);
+            upD_.assign((size_t)maxBlock_ * F, 0.0); vt_.assign((size_t)maxBlock_ * F, 0.0); vc_.assign((size_t)maxBlock_ * F, 0.0); ic_.assign((size_t)maxBlock_ * F, 0.0);
         }
     }
 
@@ -158,6 +158,11 @@ public:
     // Last process() block at the host rate (first n entries): cone velocity [m/s] for the hybrid acoustic route (dossier
     // Sec. 27), and the output scale kOut that maps terminal volts to output units (identical to the one process() applies).
     const std::vector<double>& coneVelocityBlock() const { return vcB_; }
+    // Speaker-terminal CURRENT [A] of the last process() block at the host rate (dossier Sec. 05/25/31: expose terminal voltage AND current).
+    // Total current into the load at the terminals (voice coil + dummy + extension), decimated by its own resampler.  Off by default so the
+    // plugin pays nothing; the offline tools switch it on.  Same latency as the voltage output.
+    void setCaptureTerminalCurrent(bool on) { captureCurrent_ = on; }
+    const std::vector<double>& terminalCurrentBlock() const { return icB_; }
     double outputScale() const { return std::pow(10.0, (double)applied_.outputDb / 20.0) / (double)applied_.outputRefVolts; }
 
     EngineDiag diag() const
@@ -173,7 +178,7 @@ public:
 
     void reset()
     {
-        os_.reset(); osCone_.reset(); acoustic_.reset();
+        os_.reset(); osCone_.reset(); osCur_.reset(); acoustic_.reset();
         amp_.initialiseQuiescent(0.1);
         coilDeltaT_ = 0.0; amp_.setVoiceCoilResistance(params_.speakerHeating ? amp_.cfg.speaker.Re : amp_.cfg.speaker.Re);
     }
@@ -204,6 +209,7 @@ public:
             amp_.tick(upD_[i]);
             const double vt = amp_.vTerminal();
             vt_[i] = vt; vc_[i] = amp_.coneVelocity();
+            if (captureCurrent_) ic_[i] = amp_.terminalCurrent();
             const double ic = amp_.speakerCurrent();
             coilAcc_ += ic * ic * hInt; coilCnt_ += 1;
             if (coilCnt_ >= coilInterval_) stepThermal(hInt);
@@ -212,6 +218,7 @@ public:
         if (bad) { recover(); for (int i = 0; i < n; ++i) { outTerm[i] = 0.f; outAcoustic[i] = 0.f; } return; }
         os_.down(vt_.data(), n, vtB_.data());
         osCone_.down(vc_.data(), n, vcB_.data());       // separate decimator: filter history is per-signal
+        if (captureCurrent_) osCur_.down(ic_.data(), n, icB_.data());
         for (int i = 0; i < n; ++i) {
             outTerm[i] = (float)(kOut * vtB_[i]);
             outAcoustic[i] = (float)(kOut * acoustic_.process(vcB_[i]));
@@ -301,7 +308,7 @@ private:
     void recover()
     {
         ++panics_;
-        os_.reset(); osCone_.reset(); acoustic_.reset();
+        os_.reset(); osCone_.reset(); osCur_.reset(); acoustic_.reset();
         amp_.initialiseQuiescent(0.1);
     }
 
@@ -312,9 +319,10 @@ private:
     EngineParams params_, applied_, pending_;
     bool hasPending_ = false;
     AmpCircuit amp_;
-    Oversampler os_, osCone_;
+    Oversampler os_, osCone_, osCur_;
     AcousticOperator acoustic_;
-    std::vector<double> inD_, upD_, vt_, vc_, vtB_, vcB_;
+    std::vector<double> inD_, upD_, vt_, vc_, vtB_, vcB_, ic_, icB_;
+    bool captureCurrent_ = false;
     uint64_t ctr_ = 0, panics_ = 0, nonFinite_ = 0, clamped_ = 0;
     double coilDeltaT_ = 0.0, coilAcc_ = 0.0; int64_t coilCnt_ = 0, coilInterval_ = 256;
     Network::Stats diagBase_;
