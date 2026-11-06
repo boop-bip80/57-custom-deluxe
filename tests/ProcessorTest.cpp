@@ -166,6 +166,41 @@ int main()
     }
 
 
+    std::cout << "-- second plug (dossier Sec. 06): a second guitar on the right input, or a terminated cable\n";
+    {
+        constexpr double fs = 48000.0;
+        auto* outMode = findParam(*inst, "Output");
+        auto* plug2 = findParam(*inst, "Second Plug");
+        auto* src2 = findParam(*inst, "Second Plug Source");
+        auto* inCh = findParam(*inst, "Input channel");
+        CHECK(plug2 != nullptr && plug2->getNumSteps() == 5 && src2 != nullptr && src2->getNumSteps() == 2, "Second Plug (none / Inst 1 / Inst 2 / Mic 1 / Mic 2) and Second Plug Source (terminated / right input) are exposed");
+        if (outMode && plug2 && src2 && inCh) {
+            outMode->setValueNotifyingHost(1.0f / 3.0f);
+            std::vector<float> x((size_t)(0.3 * fs));
+            for (size_t i = 0; i < x.size(); ++i) x[i] = 0.0008f * (float)std::sin(2 * M_PI * 1300.0 * (double)i / fs) * (float)std::min(1.0, (double)i / (0.03 * fs));
+            const std::vector<float> zero(x.size(), 0.0f);
+            auto render = [&](const std::vector<float>& l, const std::vector<float>& r, float plug, float source) {
+                plug2->setValueNotifyingHost(plug); src2->setValueNotifyingHost(source); inCh->setValueNotifyingHost(0.5f);       // first source = left only
+                inst->setPlayConfigDetails(2, 2, fs, 512); inst->prepareToPlay(fs, 512);
+                std::vector<float> out;
+                for (size_t i = 0; i < l.size(); i += 512) {
+                    const int n = (int)std::min<size_t>(512, l.size() - i);
+                    AudioBuffer<float> b(2, n); MidiBuffer m;
+                    for (int k = 0; k < n; ++k) { b.setSample(0, k, l[i + (size_t)k]); b.setSample(1, k, r[i + (size_t)k]); }
+                    inst->processBlock(b, m);
+                    for (int k = 0; k < n; ++k) out.push_back(b.getSample(0, k));
+                }
+                return out;
+            };
+            auto line = [&](const std::vector<float>& v, double f) { const size_t n = (size_t)(0.2 * fs), s0 = v.size() - n; double c = 0, q = 0; for (size_t i = 0; i < n; ++i) { const double w = 2 * M_PI * f * (double)i / fs; c += v[s0 + i] * std::cos(w); q += v[s0 + i] * std::sin(w); } return std::sqrt(c * c + q * q) * 2.0 / (double)n; };
+            // the right channel carries a 1.3 kHz tone; the left channel is silent.  Plug 2 = Instrument 2 (index 2 of 5 -> 0.5)
+            const auto none = render(zero, x, 0.0f, 1.0f), terminated = render(zero, x, 0.5f, 0.0f), driven = render(zero, x, 0.5f, 1.0f);
+            const double lNone = line(none, 1300.0), lTerm = line(terminated, 1300.0), lDriven = line(driven, 1300.0);
+            CHECK(lDriven > 100.0 * lNone && lDriven > 100.0 * lTerm, "the right-channel signal reaches the amplifier only through a DRIVEN second plug (1.3 kHz line " + String(lDriven, 5) + " FS vs " + String(lTerm, 7) + " terminated, " + String(lNone, 7) + " no plug)");
+            plug2->setValueNotifyingHost(0.0f); src2->setValueNotifyingHost(0.0f); inCh->setValueNotifyingHost(0.0f);
+        }
+    }
+
     std::cout << "-- input channel choice (dual-mono source stays calibrated; a one-sided source is selectable)\n";
     {
         constexpr double fs = 48000.0;

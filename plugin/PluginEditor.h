@@ -61,7 +61,7 @@ private:
     JackComponent jacks_[4];
     PowerSwitch powerSw_;
     std::unique_ptr<juce::ParameterAttachment> jackAtt_, powerAtt_;
-    ComboBoxRow cPatch_, cLoad_, cOut_, cMarket_, cV1_, cV2_, cRect_, cOS_, cSource_, cTaper_, cInCh_;
+    ComboBoxRow cPlug2_, cPlug2Src_, cPatch_, cLoad_, cOut_, cMarket_, cV1_, cV2_, cRect_, cOS_, cSource_, cTaper_, cInCh_;
     SliderRow sMicPos_, sMicDist_, sTrim_, sOutLevel_, sInCal_, sLine_, sSrcR_, sVar_, sSeed_, sHum_, sNoise_;
     juce::ToggleButton heatBtn_{"Speaker heating"}, bypassBtn_{"Bypass"}, otSatBtn_{"OT saturation (assumed)"};
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> heatAtt_, bypassAtt_, otSatAtt_;

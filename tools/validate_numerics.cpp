@@ -450,11 +450,12 @@ static std::unique_ptr<CD57Engine> makeCore(const EngineParams& p0, double fsInt
     }
     return e;
 }
-static CoreOut runCore(const EngineParams& p0, double fsInt, const std::vector<double>& u, const ThetaCfg& th = ThetaCfg())
+static CoreOut runCore(const EngineParams& p0, double fsInt, const std::vector<double>& u, const ThetaCfg& th = ThetaCfg(), double tolScale = 1.0)
 {
     const auto e = makeCore(p0, fsInt, th);
     CoreOut o; o.y.resize(u.size());
     AmpCircuit& a = e->amp();
+    if (tolScale != 1.0) { Network& n = a.network(); n.absTolV *= tolScale; n.relTol *= tolScale; n.resTolA *= tolScale; }     // section F only
     const Network::Stats base = a.network().stats;
     for (size_t i = 0; i < u.size(); ++i) { a.tick(u[i]); o.y[i] = a.vTerminal(); }
     const Network::Stats& s = a.network().stats;
@@ -678,13 +679,13 @@ static void sectionC(bool quick)
 // ================================================================================================ D. step-size convergence
 // core-only window: solver at F x host rate, analytic input, ideal decimation (no resampler, no delay)
 struct CoreWin { std::vector<double> y; double subst = 0, failures = 0, meanIt = 0; };
-static CoreWin coreWindow(const EngineParams& p, const Stimulus& st, double fs, int F, const ThetaCfg& th, bool naiveStamp = false)
+static CoreWin coreWindow(const EngineParams& p, const Stimulus& st, double fs, int F, const ThetaCfg& th, bool naiveStamp = false, double tolScale = 1.0)
 {
     const size_t N = windowLen(fs), nHost = (size_t)std::ceil(st.winStart * fs) + N;
     std::vector<double> u(nHost * (size_t)F);
     // tick j sits at mains time (j+1)/(F fs): feed the signal of that instant so every rate sees the same signal-to-mains phase
     for (size_t j = 0; j < u.size(); ++j) u[j] = st.x((double)(j + (naiveStamp ? 0 : 1)) / (fs * F));
-    const CoreOut c = runCore(p, fs * F, u, th);
+    const CoreOut c = runCore(p, fs * F, u, th, tolScale);
     CoreWin w;
     w.y = IdealDecimator(fs, F).window(c.y, (long)(nHost - N), (long)N, 0.0, naiveStamp ? 0 : -1);
     w.subst = c.steps ? (double)c.substepped / (double)c.steps : 0.0; w.failures = (double)c.failures; w.meanIt = c.meanIt;
@@ -766,6 +767,36 @@ static void sectionD(bool quick)
         }
         R << "\n";
     }
+}
+
+// ================================================================================================ F. is the Newton tolerance what limits the accuracy?
+static void sectionF(bool quick)
+{
+    section("F. The Newton tolerance is not what limits the accuracy (dossier Sec. 21)");
+    para("Section D shows the error of the heavy-drive tone falling as a power of the step size, which is the signature of time-step truncation; this section tests the alternative explanation directly. "
+         "The solver's convergence tolerances (step tolerance in volts, relative tolerance, nodal KCL residual in amperes) are tightened by a factor of 10^4 and the residual against a much finer run is compared "
+         "with the production tolerances. If convergence limited the accuracy the residual would fall; if it is truncation of the integration it does not move. 3.1 kHz tone, 60 mV peak at the jack, 8 ohm dummy load.");
+    EngineParams p = baseParams();
+    const Stimulus st = toneStim(3100, 0.060);
+    const int Fref = quick ? 16 : 32;
+    const int Fc[2] = {2, 8};
+    CoreWin ref, w[2][2];
+    parallelFor(5, [&](size_t i) {
+        if (i == 0) ref = coreWindow(p, st, 48000.0, Fref, ThetaCfg());
+        else { const int k = (int)(i - 1) / 2, t = (int)(i - 1) % 2; w[k][t] = coreWindow(p, st, 48000.0, Fc[k], ThetaCfg(), false, t == 0 ? 1.0 : 1e-4); }
+    });
+    R << "| solver rate | tolerances | residual vs " << Fref << "x, dBFS | Newton it/step | sub-stepped |\n|---|---|---|---|---|\n";
+    double worst = 0;
+    for (int k = 0; k < 2; ++k) {
+        const double d0 = compareWin(w[k][0].y, ref.y, 48000.0, kFsPeak, 0.0).resDb, d1 = compareWin(w[k][1].y, ref.y, 48000.0, kFsPeak, 0.0).resDb;
+        R << "| " << Fc[k] << "x | production | " << f(d0, 1) << " | " << f(w[k][0].meanIt, 2) << " | " << f(100 * w[k][0].subst, 2) << " % |\n";
+        R << "| " << Fc[k] << "x | tightened 10^4 x | " << f(d1, 1) << " | " << f(w[k][1].meanIt, 2) << " | " << f(100 * w[k][1].subst, 2) << " % |\n";
+        worst = std::max(worst, std::fabs(d1 - d0));
+        std::cout << "  F=" << Fc[k] << ": production " << f(d0, 1) << " dBFS, tightened " << f(d1, 1) << " dBFS\n";
+    }
+    R << "\n";
+    check(worst < 1.0, "tightening the Newton and KCL tolerances 10^4 x changes the heavy-drive residual by less than 1 dB at 2x and 8x: the residual is time-step truncation, not convergence", "largest change " + f(worst, 2) + " dB");
+    info("consequence: the only ways to lower the heavy-drive residual are smaller steps (more oversampling) or a more accurate integrator for the kinks of the device laws; neither more Newton iterations nor tighter tolerances help");
 }
 
 // ================================================================================================ E. solver self-checks
@@ -886,7 +917,7 @@ static void sectionE(bool quick)
 // ================================================================================================ main
 int main(int argc, char** argv)
 {
-    bool quick = false; std::string reportPath, only = "ABCDE";
+    bool quick = false; std::string reportPath, only = "ABCDEF";
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--quick") quick = true;
@@ -906,6 +937,7 @@ int main(int argc, char** argv)
     if (want('C')) sectionC(quick);
     if (want('D')) sectionD(quick);
     if (want('E')) sectionE(quick);
+    if (want('F')) sectionF(quick);
 
     const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     R << "\n---\n**Summary: " << nPass << " passed, " << nFail << " failed** (" << f(secs, 1) << " s)\n";

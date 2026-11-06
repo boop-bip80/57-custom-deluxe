@@ -9,7 +9,7 @@
   "properties": {
     "schema": {"type": "string", "enum": ["cd57-capture-v1"]},
     "id": {"type": "string", "description": "unique capture ID, e.g. CM-I1-i6m2t6-onset"},
-    "set": {"type": "string", "enum": ["core", "endpoints", "heldout"]},
+    "set": {"type": "string", "enum": ["core", "endpoints", "jackstates", "heldout"]},
     "synthetic": {"type": "boolean", "description": "true for a model render, false for a recording of a physical amplifier"},
     "specimen": {
       "type": "object",
@@ -26,7 +26,8 @@
     "source_impedance_ohm": {"type": ["number", "null"]},
     "source_model": {"type": "string"},
     "jack_state": {"type": "object", "required": ["guitar_jack", "patch_cable", "speaker_load"],
-                   "properties": {"guitar_jack": {"type": "string", "enum": ["none", "I1", "I2", "M1", "M2"]}, "patch_cable": {"type": "string"}, "speaker_load": {"type": "string"}}},
+                   "properties": {"guitar_jack": {"type": "string", "enum": ["none", "I1", "I2", "M1", "M2"]}, "second_plug": {"type": "string", "enum": ["none", "I1", "I2", "M1", "M2"]},
+                                  "second_plug_source": {"type": "string"}, "patch_cable": {"type": "string", "enum": ["none", "I1-I2", "M1-M2", "I1-M1", "I1-M2", "I2-M1", "I2-M2"]}, "speaker_load": {"type": "string"}}},
     "knobs": {"type": "object", "required": ["instrument_volume_printed", "mic_volume_printed", "tone_printed", "knob_angle_deg", "pot_electrical_fraction", "pot_map_status"],
               "properties": {"instrument_volume_printed": {"type": "number"}, "mic_volume_printed": {"type": "number"}, "tone_printed": {"type": "number"},
                              "knob_angle_deg": {"type": ["object", "null"]}, "pot_electrical_fraction": {"type": ["object", "null"]}, "pot_map_status": {"type": "string"}}},

@@ -52,7 +52,7 @@ Dossier Sec. 26 tolerances for orientation: clean response 0.5 dB, onset 0.5 dB,
 | 38 | output grid leaks 220k x2 (together) | Passive values (historical baseline) | 0.95 .. 1.05 x nominal | netlist tol 5 % | **0.01 dB** | hum at the terminals | -0.01 / +0.01 | 0 |
 | 39 | output grid stoppers 1.5k x2 (together) | Passive values (historical baseline) | 0.95 .. 1.05 x nominal | netlist tol 5 % | **0.01 dB** | post-burst probe dip | -0.01 / +0.01 | 0 |
 | 40 | input grid stoppers 68k x4 (together) | Passive values (historical baseline) | 0.95 .. 1.05 x nominal | netlist tol 5 % | **0.00 dB** | treble shape 5 kHz re 1 kHz | +0.00 / -0.00 | 0 |
-| 41 | speaker_Mms | Speaker complex impedance | 0.012 .. 0.03 kg | manifest interval | **0.00 dB** | THD at fixed drive (speaker) | -0.00 / +0.00 | 0 |
+| 41 | speaker_Mms | Speaker complex impedance | 0.012 .. 0.03 kg | manifest interval | **0.00 dB** | THD at fixed drive (speaker) | -0.00 / -0.00 | 0 |
 
 ## Full effect table (dB, low end / high end)
 

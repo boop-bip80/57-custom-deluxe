@@ -74,6 +74,10 @@ struct AmpConfig {
     double otSatFlux = std::nan("");         // V*s per secondary turn (used only when the optional saturation law is switched on)
     double potTotal = 1.0e6;
     PotMap volumeMap, toneMap;
+    // A MEASURED pot map from the manifest (Sec. 08) overrides the assumed taper selection of the plugin.  The Instrument and Mic volumes can be
+    // measured separately (micVolumeMap is used only when micMapMeasured is set, otherwise both volumes share volumeMap).
+    PotMap micVolumeMap;
+    bool volumeMapMeasured = false, micMapMeasured = false, toneMapMeasured = false;
     SpeakerTS speaker;
     // source model
     bool pickupModel = false;
@@ -91,6 +95,8 @@ struct AmpConfig {
 struct AmpControls {
     double instVol = 0.7, micVol = 0.0, tone = 0.7;   // knob rotation 0..1
     int guitarJack = 1;                      // 0 none, 1 Instrument1, 2 Instrument2, 3 Mic1, 4 Mic2
+    int guitarJack2 = 0;                     // SECOND plug (a second guitar, or a cable terminated in the source impedance): 0 none, 1..4 as above.  Same jack as the
+                                             // first plug is ignored (one jack holds one plug).
     int patch = 0;                           // 0 none, 1 I1-I2, 2 M1-M2, 3 I1-M1, 4 I1-M2, 5 I2-M1, 6 I2-M2
     LoadMode load = LoadMode::Speaker;
     bool power = true;
@@ -166,7 +172,11 @@ public:
     }
 
     // advance one internal step.  eEmf: source EMF in volts.  Returns false if the solver failed this step.
-    bool tick(double eEmf, bool allowWarm = false)
+    bool tick(double eEmf, bool allowWarm = false) { (void)allowWarm; return tick2(eEmf, 0.0); }
+
+    // advance one internal step with a SECOND source: eEmf2 drives the second plug (0 = a terminated cable: the plug and its source impedance are present,
+    // the signal is not)
+    bool tick2(double eEmf, double eEmf2)
     {
         Network& n = *net_;
         phase_ += 2.0 * kPi * cfg.mainsHz / fsInt_;
@@ -177,6 +187,7 @@ public:
         double vin = eEmf;
         if (cfg.noiseScale > 0.0) vin += cfg.noiseScale * noiseDensityV_ * gauss_();
         n.inj(pu_) = vin * srcG_;
+        n.inj(pu2_) = eEmf2 * srcG2_;
         if (cfg.humCurrent != 0.0) n.inj(k1_) = cfg.humCurrent * std::sin(phase_ * 1.0);
         updatePowerEnvelope();
         return n.step();
@@ -209,7 +220,7 @@ public:
         cur_.tone += a * (target_.tone - cur_.tone);
         auto snap = [](double& c, double t) { if (std::fabs(c - t) < 1e-5) c = t; };
         snap(cur_.instVol, target_.instVol); snap(cur_.micVol, target_.micVol); snap(cur_.tone, target_.tone);
-        cur_.guitarJack = target_.guitarJack; cur_.patch = target_.patch; cur_.load = target_.load; cur_.power = target_.power;
+        cur_.guitarJack = target_.guitarJack; cur_.guitarJack2 = target_.guitarJack2; cur_.patch = target_.patch; cur_.load = target_.load; cur_.power = target_.power;
         const double RT = cfg.potTotal;
         const double Rc = cfg.volumeMap.endpointResistance;
         auto setPot = [&](int lo, int hi, double alpha) {
@@ -217,7 +228,7 @@ public:
             n.setR(hi, std::max((1.0 - alpha) * RT, Rc));
         };
         setPot(R_vb_lo_, R_vb_hi_, cfg.volumeMap.alpha(cur_.instVol));
-        setPot(R_vn_lo_, R_vn_hi_, cfg.volumeMap.alpha(cur_.micVol));
+        setPot(R_vn_lo_, R_vn_hi_, (cfg.micMapMeasured ? cfg.micVolumeMap : cfg.volumeMap).alpha(cur_.micVol));
         // tone: beta = fraction from the 5 nF end to the wiper
         const double beta = cfg.toneMap.alpha(cur_.tone);
         setPot(R_t_b_, R_t_a_, beta);
@@ -226,6 +237,8 @@ public:
         const double ON = 0.02, OFF = 1e11;
         bool plugged[4] = {false, false, false, false};
         if (cur_.guitarJack >= 1 && cur_.guitarJack <= 4) plugged[cur_.guitarJack - 1] = true;
+        const int j2 = (cur_.guitarJack2 >= 1 && cur_.guitarJack2 <= 4 && cur_.guitarJack2 != cur_.guitarJack) ? cur_.guitarJack2 : 0;     // one jack holds one plug
+        if (j2) plugged[j2 - 1] = true;
         static const int pairA[7] = {0, 0, 2, 0, 0, 1, 1}, pairB[7] = {0, 1, 3, 2, 3, 2, 3};
         int patch = cur_.patch;
         if (patch > 0) {
@@ -235,7 +248,7 @@ public:
         }
         n.setR(R_sw_b1_, plugged[0] ? OFF : ON); n.setR(R_sw_b2_, plugged[1] ? OFF : ON);
         n.setR(R_sw_n1_, plugged[2] ? OFF : ON); n.setR(R_sw_n2_, plugged[3] ? OFF : ON);
-        for (int j = 0; j < 4; ++j) n.setR(R_sel_[j], (cur_.guitarJack == j + 1) ? ON : OFF);
+        for (int j = 0; j < 4; ++j) { n.setR(R_sel_[j], (cur_.guitarJack == j + 1) ? ON : OFF); n.setR(R_sel2_[j], (j2 == j + 1) ? ON : OFF); }
         static const int ptIdx[7] = {-1, 0, 1, 2, 3, 4, 5};
         for (int p = 0; p < 6; ++p) n.setR(R_pt_[p], (patch > 0 && ptIdx[patch] == p) ? ON : OFF);
 
@@ -292,7 +305,7 @@ private:
     void bind()
     {
         Network& n = *net_;
-        pu_ = n.nodeId("pu"); sp_ = n.nodeId("sp"); sx_ = n.nodeId("sx"); sy_ = n.nodeId("sy");
+        pu_ = n.nodeId("pu"); pu2_ = n.nodeId("pu2"); sp_ = n.nodeId("sp"); sx_ = n.nodeId("sx"); sy_ = n.nodeId("sy");
         ra_ = n.nodeId("ra"); rb_ = n.nodeId("rb"); k1_ = n.nodeId("k1");
         R_vb_lo_ = n.resId("Rvb_lo"); R_vb_hi_ = n.resId("Rvb_hi");
         R_vn_lo_ = n.resId("Rvn_lo"); R_vn_hi_ = n.resId("Rvn_hi");
@@ -302,6 +315,8 @@ private:
         const char* pt[6] = {"Rpt_b1b2", "Rpt_n1n2", "Rpt_b1n1", "Rpt_b1n2", "Rpt_b2n1", "Rpt_b2n2"};
         for (int i = 0; i < 6; ++i) R_pt_[i] = n.resId(pt[i]);
         R_src_ = n.resId("Rsrc"); L_pu_ = n.indId("Lpu"); C_cab_ = n.capId("Ccab");
+        R_src2_ = n.resId("Rsrc2"); L_pu2_ = n.indId("Lpu2"); C_cab2_ = n.capId("Ccab2");
+        { const char* s2[4] = {"Rsel2_b1", "Rsel2_b2", "Rsel2_n1", "Rsel2_n2"}; for (int i = 0; i < 4; ++i) R_sel2_[i] = n.resId(s2[i]); }
         R_re_ = n.resId("Re"); R_dum_ = n.resId("Rdum"); R_ext_ = n.resId("Rext");
         L_le_ = n.indId("Le"); R_es_ = n.resId("Res"); C_mes_ = n.capId("Cmes"); L_ces_ = n.indId("Lces");
         R_k1_ = n.resId("Rk1");
@@ -327,6 +342,9 @@ private:
             n.setR(R_src_, std::max(cfg.srcR, 1.0)); n.setL(L_pu_, std::max(cfg.srcL, 1e-9)); n.setC(C_cab_, cfg.cableC);
         }
         srcG_ = 1.0 / n.getR(R_src_);
+        // the second plug carries the same kind of source (line/DI or pickup + cable)
+        n.setR(R_src2_, n.getR(R_src_)); n.setL(L_pu2_, cfg.pickupModel ? cfg.pickupL : std::max(cfg.srcL, 1e-9)); n.setC(C_cab2_, cfg.pickupModel ? cfg.pickupCable : cfg.cableC);
+        srcG2_ = 1.0 / n.getR(R_src2_);
         n.setR(n.resId("Rs_a"), cfg.ptRs); n.setR(n.resId("Rs_b"), cfg.ptRs);
         n.setCoreSaturation(cfg.otSaturation);
         applyTransformerConfig();
@@ -405,10 +423,11 @@ private:
     double fsInt_ = 96000, theta_ = 0.5, phase_ = 0.0;
     AmpControls target_, cur_;
     double smoothCoef_ = 0.2, mainsGain_ = 1.0, mainsTarget_ = 1.0, emTube_ = 1.0, emRect_ = 1.0;
-    double Bl_ = 1.0, voiceCoilR_ = 6.4, load_g_ = 0.0, srcG_ = 0.01, noiseDensityV_ = 0.0;
+    double Bl_ = 1.0, voiceCoilR_ = 6.4, load_g_ = 0.0, srcG_ = 0.01, srcG2_ = 0.01, noiseDensityV_ = 0.0;
     double rRe_ = 6.4, rDum_ = 1e11, rExt_ = 1e11;     // resistances presently set on the voice-coil / dummy / extension branches
-    int pu_, sp_, sx_, sy_, ra_, rb_, k1_;
+    int pu_, pu2_, sp_, sx_, sy_, ra_, rb_, k1_;
     int R_vb_lo_, R_vb_hi_, R_vn_lo_, R_vn_hi_, R_t_a_, R_t_b_, R_sw_b1_, R_sw_b2_, R_sw_n1_, R_sw_n2_;
+    int R_sel2_[4], R_src2_, L_pu2_, C_cab2_;
     int R_sel_[4], R_pt_[6], R_src_, L_pu_, C_cab_, R_re_, R_dum_, R_ext_, L_le_, R_es_, C_mes_, L_ces_, R_k1_;
     int R_rs_a_ = -1, R_rs_b_ = -1;
     std::mt19937 noiseRng_{1};

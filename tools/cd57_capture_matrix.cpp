@@ -1,10 +1,11 @@
 // cd57_capture_matrix -- render the dossier Sec. 25 capture programme through the MODEL, so that the same programme run on a physical amplifier
 // produces a directly comparable dataset (tools/cd57_compare.cpp) and so that model changes can be regression-tested against a committed reference.
 //
-//   cd57_capture_matrix --out DIR [--set core|endpoints|heldout|all] [--quick] [--sr 48000] [--os 1] [--load 2] [--threads N]
+//   cd57_capture_matrix --out DIR [--set core|endpoints|jackstates|heldout|all] [--quick] [--sr 48000] [--os 1] [--load 2] [--threads N]
 //                       [--wav] [--only SUBSTR] [--timestamp ISO8601] [--summary FILE.csv]
 //                       [--line PERCENT] [--taper 0|1|2] [--market 0..8] [--v1 0|1] [--v2 0|1] [--rect 0|1] [--manifest FILE]   (engine perturbations)
 //
+// "jackstates" adds the Sec. 06 rows beyond the four single inputs (both jacks of one channel, one input per channel, channel-jump patch, no source).
 // Matrix (Sec. 25): 4 single-input modes x 3 values per knob (low/mid/high = 2/6/10 on the printed 0-12 scale; 27 combinations)
 //                   = 108 conditions x 3 levels (clean, onset, driven) = 324 captures ("core"); "endpoints" adds every knob at 0 and 12 with
 //                   the others at mid (24 conditions x 3 levels); "heldout" adds 12 conditions at INTERMEDIATE knob values driven by a
@@ -32,8 +33,17 @@ static std::string gManifest;
 
 struct Cond {
     std::string set; int jack = 1; double inst = 6, mic = 2, tone = 6;
-    std::string id() const { return std::string("CM-") + jackName(jack) + "-i" + knobTag(inst) + "m" + knobTag(mic) + "t" + knobTag(tone) + (set == "heldout" ? "-H" : ""); }
+    int jack2 = 0; bool split = false; int patch = 0;      // second plug (split = driven by the same signal, otherwise a terminated cable); jumper cable code (AmpControls::patch)
+    std::string label() const    // jack state, e.g. I1, I1+I2s (second plug driven by a split of the stimulus), I1+I2t (terminated), M1~p4 (jumper I1-M2)
+    {
+        std::string s = jackName(jack);
+        if (jack2) s += std::string("+") + jackName(jack2) + (split ? "s" : "t");
+        if (patch) s += "~p" + std::to_string(patch);
+        return s;
+    }
+    std::string id() const { return std::string("CM-") + label() + "-i" + knobTag(inst) + "m" + knobTag(mic) + "t" + knobTag(tone) + (set == "heldout" ? "-H" : ""); }
 };
+static const char* patchName(int p) { static const char* n[] = {"none", "I1-I2", "M1-M2", "I1-M1", "I1-M2", "I2-M1", "I2-M2"}; return n[std::max(0, std::min(p, 6))]; }
 struct Capture {
     Cond c; int level = 0; double levelV = 0, onsetV = 0, comp1dBV = 0, ssGainDb = 0; bool onsetReached = false;
     CaptureMetrics m; double b1End = 0, b2End = 0, b3End = 0, kEnd = 0, b1Min = 0, coilK = 0; double itPerStep = 0; uint64_t fallbacks = 0, failures = 0;
@@ -55,6 +65,13 @@ static std::vector<Cond> buildConditions(const std::string& set, bool quick)
         for (int j = 1; j <= 4; ++j) for (double a : kv) for (double b : kv) for (double t : kv) v.push_back({"core", j, a, b, t});
     if (set == "endpoints" || set == "all")
         for (int j = 1; j <= 4; ++j) for (double e : {0.0, 12.0}) { v.push_back({"endpoints", j, e, 6, 6}); v.push_back({"endpoints", j, 6, e, 6}); v.push_back({"endpoints", j, 6, 6, e}); }
+    if (set == "jackstates" || set == "all") {
+        // dossier Sec. 06 test table beyond the four single inputs, at mid controls (both channels live): both jacks of one channel, one input per channel,
+        // the documented channel-jump patch, no source.  'split' = the same signal on both plugs (a Y-cable), 't' = a terminated plug (guitar at rest)
+        struct J { int j, j2; bool split; int patch; };
+        const J js[] = {{1, 2, true, 0}, {1, 2, false, 0}, {2, 1, false, 0}, {3, 4, true, 0}, {3, 4, false, 0}, {1, 3, true, 0}, {1, 3, false, 0}, {3, 1, false, 0}, {3, 0, false, 4}, {1, 0, false, 5}, {0, 0, false, 0}};
+        for (auto& x : js) { Cond c{"jackstates", x.j, 6, 6, 6}; c.jack2 = x.j2; c.split = x.split; c.patch = x.patch; v.push_back(c); }
+    }
     if (set == "heldout" || set == "all") {
         uint32_t s = 20261105u; auto pick = [&]() { static const double vals[6] = {3, 4, 5, 7, 8, 9}; s = s * 1664525u + 1013904223u; return vals[(s >> 16) % 6]; };
         for (int k = 0; k < 12; ++k) v.push_back({"heldout", 1 + (k % 4), pick(), pick(), pick()});
@@ -65,35 +82,36 @@ static std::vector<Cond> buildConditions(const std::string& set, bool quick)
 static EngineParams makeParams(const Cond& c, int os, int load)
 {
     EngineParams p = gBase; p.oversampleLog2 = os; p.instVol = (float)(c.inst / 12.0); p.micVol = (float)(c.mic / 12.0); p.tone = (float)(c.tone / 12.0);
-    p.jack = c.jack; p.load = load; p.inputCalVolts = 1.0f; p.outputRefVolts = 28.28f;
+    p.jack = c.jack; p.jack2 = c.jack2; p.patch = c.patch; p.load = load; p.inputCalVolts = 1.0f; p.outputRefVolts = 28.28f;
     p.speakerHeating = (load == 0 || load == 1);
     return p;
 }
 
 // THD / fundamental of the terminal voltage for a 1 kHz tone of peak `level`, from the quiescent state
-static M::LevelPoint toneAt(Rig& w, const Rig& tmpl, double level)
+static M::LevelPoint toneAt(Rig& w, const Rig& tmpl, double level, bool split)
 {
     w.restoreFrom(tmpl);
-    const Vec y = w.run(sineBurst(w.sr, 1000.0, level, 0.14, 0.02));
+    const Vec x = sineBurst(w.sr, 1000.0, level, 0.14, 0.02);
+    const Vec y = w.run(x, nullptr, nullptr, split ? &x : nullptr);
     const auto t = M::analyseTone(y, w.sr, 1000.0, (size_t)std::llround(0.1 * w.sr), 10);
     return {level, t.fundamental, t.thd};
 }
 
 struct Onset { double thd1 = NAN, comp = NAN, ssGainDb = 0; };
-static Onset searchOnset(Rig& w, const Rig& tmpl, double cap)
+static Onset searchOnset(Rig& w, const Rig& tmpl, double cap, bool split)
 {
     std::vector<M::LevelPoint> pts;
     double lo = 1e-3, L = 1e-3; bool bracket = false; double hiL = 0;
     // 6 dB steps up to 1 % THD (or the cap), then bisection in log level
     while (true) {
-        const auto p = toneAt(w, tmpl, L); pts.push_back(p);
+        const auto p = toneAt(w, tmpl, L, split); pts.push_back(p);
         if (p.thd >= 0.01) { hiL = L; bracket = true; break; }
         lo = L; if (L >= cap) break;
         L = std::min(cap, L * 2.0);
     }
     if (bracket && hiL > lo) {
         double a = lo, b = hiL;
-        for (int i = 0; i < 4; ++i) { const double m = std::sqrt(a * b); const auto p = toneAt(w, tmpl, m); pts.push_back(p); (p.thd >= 0.01 ? b : a) = m; }
+        for (int i = 0; i < 4; ++i) { const double m = std::sqrt(a * b); const auto p = toneAt(w, tmpl, m, split); pts.push_back(p); (p.thd >= 0.01 ? b : a) = m; }
     }
     std::sort(pts.begin(), pts.end(), [](const M::LevelPoint& a, const M::LevelPoint& b) { return a.inPeak < b.inPeak; });
     const M::Onset o = M::findOnset(pts, 0.01, 1.0);
@@ -106,7 +124,8 @@ static void runCondition(const Cond& c, int os, double sr, int load, std::vector
     const EngineParams p = makeParams(c, os, load);
     Rig tmpl(p, sr, 512, gManifest), w(p, sr, 512, gManifest);
     const double cap = 20.0;
-    const Onset on = searchOnset(w, tmpl, cap);
+    const bool splitDrive = c.jack2 && c.split;
+    const Onset on = searchOnset(w, tmpl, cap, splitDrive);
     const bool reached = std::isfinite(on.thd1);
     const double onsetV = reached ? on.thd1 : cap;
     const double levels[3] = {0.005, onsetV, std::min(cap, onsetV * std::pow(10.0, 12.0 / 20.0))};
@@ -125,7 +144,7 @@ static void runCondition(const Cond& c, int os, double sr, int load, std::vector
         auto onBlock = [&](size_t idx) {
             if (burst && probe && idx >= burst->begin && idx <= probe->begin + (size_t)(0.1 * sr)) b1min = std::min(b1min, w.e.amp().nodeV("b1"));
         };
-        Vec cur; const Vec vt = w.run(comp.jackVolts, &cur, onBlock);
+        Vec cur; const Vec vt = w.run(comp.jackVolts, &cur, onBlock, splitDrive ? &comp.jackVolts : nullptr);
         const auto st1 = w.e.diag();
         cp.hash = comp.hash; cp.seg = comp.seg;
         if (c.set == "heldout") { cp.rmsV = M::rms(vt); cp.peakV = M::peakAbs(vt); cp.crest = cp.peakV / std::max(cp.rmsV, 1e-12); cp.m.peakV = cp.peakV; }
@@ -161,7 +180,8 @@ static void writeMetadata(const Capture& c, const std::string& dir, double sr, i
     o << "  \"mains\": {\"volts\": " << jnum(mv.volts) << ", \"hz\": " << jnum(mv.hz) << ", \"line_percent\": 100},\n";
     o << "  \"warmup\": {\"state\": \"solved_quiescent_initial_state\", \"seconds\": 0},\n";
     o << "  \"source_impedance_ohm\": 100, \"source_model\": \"line_DI_ideal_EMF_plus_series_R\",\n";
-    o << "  \"jack_state\": {\"guitar_jack\": " << jstr(jackName(c.c.jack)) << ", \"patch_cable\": \"none\", \"speaker_load\": " << jstr(loadName[std::min(load, 4)]) << "},\n";
+    o << "  \"jack_state\": {\"guitar_jack\": " << jstr(jackName(c.c.jack)) << ", \"second_plug\": " << jstr(c.c.jack2 ? jackName(c.c.jack2) : "none") << ", \"second_plug_source\": "
+      << jstr(c.c.jack2 ? (c.c.split ? "same signal as the first plug (split)" : "terminated cable (guitar at rest)") : "none") << ", \"patch_cable\": " << jstr(patchName(c.c.patch)) << ", \"speaker_load\": " << jstr(loadName[std::min(load, 4)]) << "},\n";
     o << "  \"knobs\": {\"instrument_volume_printed\": " << jnum(c.c.inst) << ", \"mic_volume_printed\": " << jnum(c.c.mic) << ", \"tone_printed\": " << jnum(c.c.tone)
       << ", \"knob_angle_deg\": null, \"pot_electrical_fraction\": {\"instrument\": " << jnum(pm.alpha(c.c.inst / 12.0)) << ", \"mic\": " << jnum(pm.alpha(c.c.mic / 12.0)) << ", \"tone\": " << jnum(c.c.tone / 12.0)
       << "}, \"pot_map_status\": \"assumed (audio 15 % taper for volumes, linear tone): numerical taper of the modern amplifier is UNKNOWN\"},\n";
@@ -217,7 +237,7 @@ static std::string csvRow(const Capture& c)
     const bool ho = c.setName == "heldout";
     auto thd = [&](size_t i) { return m.thdSweepPct.size() > i ? jnum(m.thdSweepPct[i], 7) : std::string(""); };
     std::ostringstream o;
-    o << c.id << "," << c.setName << "," << jackName(c.c.jack) << "," << c.c.inst << "," << c.c.mic << "," << c.c.tone << "," << levelName(c.level) << "," << jnum(c.levelV, 8) << "," << jnum(c.onsetV, 8) << "," << (c.onsetReached ? 1 : 0) << "," << jnum(c.comp1dBV, 8) << "," << jnum(c.ssGainDb, 7) << ","
+    o << c.id << "," << c.setName << "," << c.c.label() << "," << c.c.inst << "," << c.c.mic << "," << c.c.tone << "," << levelName(c.level) << "," << jnum(c.levelV, 8) << "," << jnum(c.onsetV, 8) << "," << (c.onsetReached ? 1 : 0) << "," << jnum(c.comp1dBV, 8) << "," << jnum(c.ssGainDb, 7) << ","
       << (ho ? "" : jnum(m.floorRmsV * 1e3, 7)) << "," << (ho ? "" : jnum(m.toneGainDb, 7)) << "," << (ho ? "" : jnum(m.toneRmsV, 8)) << "," << (ho ? "" : jnum(m.tonePeakV, 8)) << "," << (ho ? "" : jnum(m.powerW, 8)) << "," << (ho ? "" : jnum(m.thdPct, 7)) << ","
       << (ho ? "" : h(1)) << "," << (ho ? "" : h(2)) << "," << (ho ? "" : h(3)) << "," << (ho ? "" : h(4)) << "," << (ho ? "" : jnum(m.imd.totalDb, 7)) << "," << (ho ? "" : jnum(im, 7)) << ","
       << (ho ? "" : at(100)) << "," << (ho ? "" : at(400)) << "," << (ho ? "" : at(1000)) << "," << (ho ? "" : at(4000)) << "," << (ho ? "" : at(8000)) << "," << (ho ? "" : jnum(m.bwLoHz, 6)) << "," << (ho ? "" : jnum(m.bwHiHz, 6)) << ","

@@ -61,6 +61,8 @@ AudioProcessorValueTreeState::ParameterLayout CD57AudioProcessor::createLayout()
     fl(pid::micVol, "Mic Volume", lin(0.0f, 12.0f, 0.01f), 0.0f);
     fl(pid::tone, "Tone", lin(0.0f, 12.0f, 0.01f), 7.0f);
     ch(pid::jack, "Guitar Jack", {"Instrument 1", "Instrument 2", "Mic 1", "Mic 2"}, 0);
+    ch(pid::plug2, "Second Plug", {"None", "Instrument 1", "Instrument 2", "Mic 1", "Mic 2"}, 0);
+    ch(pid::plug2Src, "Second Plug Source", {"Terminated cable (guitar at rest)", "Right input (second guitar)"}, 0);
     ch(pid::patch, "Jumper Cable", {"None", "Inst 1 - Inst 2", "Mic 1 - Mic 2", "Inst 1 - Mic 1", "Inst 1 - Mic 2", "Inst 2 - Mic 1", "Inst 2 - Mic 2"}, 0);
     bo(pid::power, "Power", true);
     bo(pid::bypass, "Bypass", false);
@@ -109,6 +111,7 @@ CD57AudioProcessor::CD57AudioProcessor()
     irStatus_ = "No IR loaded: the IR output modes pass the speaker terminals through unchanged";
     pBypass_ = apvts.getRawParameterValue(pid::bypass);
     pInputCh_ = apvts.getRawParameterValue(pid::inputCh);
+    pPlug2_ = apvts.getRawParameterValue(pid::plug2); pPlug2Src_ = apvts.getRawParameterValue(pid::plug2Src);
     apvts.addParameterListener(pid::oversample, this);
     rebuilder_ = std::make_unique<Rebuilder>(*this);
 }
@@ -141,7 +144,7 @@ cd57::EngineParams CD57AudioProcessor::gatherParams() const
     auto g = [&](const char* id) { return apvts.getRawParameterValue(id)->load(); };
     cd57::EngineParams e;
     e.instVol = g(pid::instVol) / 12.0f; e.micVol = g(pid::micVol) / 12.0f; e.tone = g(pid::tone) / 12.0f;
-    e.jack = (int)g(pid::jack) + 1; e.patch = (int)g(pid::patch); e.load = (int)g(pid::load);
+    e.jack = (int)g(pid::jack) + 1; e.jack2 = (int)g(pid::plug2); e.patch = (int)g(pid::patch); e.load = (int)g(pid::load);
     e.power = g(pid::power) > 0.5f;
     e.inputTrimDb = g(pid::inTrim); e.outputDb = g(pid::outLevel); e.inputCalVolts = g(pid::inCal);
     e.market = (int)g(pid::market); e.linePercent = g(pid::linePct);
@@ -183,7 +186,7 @@ void CD57AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     sampleRate_ = sampleRate;
     maxBlock_ = std::max(64, std::min(samplesPerBlock, 2048));
-    monoIn_.assign((size_t)maxBlock_, 0.0f); outTerm_.assign((size_t)maxBlock_, 0.0f); outAc_.assign((size_t)maxBlock_, 0.0f);
+    monoIn_.assign((size_t)maxBlock_, 0.0f); monoIn2_.assign((size_t)maxBlock_, 0.0f); outTerm_.assign((size_t)maxBlock_, 0.0f); outAc_.assign((size_t)maxBlock_, 0.0f);
     irBuf_.assign((size_t)maxBlock_, 0.0f); coneBuf_.assign((size_t)maxBlock_, 0.0f);
     inHist_.assign((size_t)kInHist, 0.0f); primeBuf_.assign((size_t)kInHist, 0.0f); inHistPos_ = 0;
     fadeTerm_.assign((size_t)maxBlock_, 0.0f); fadeAc_.assign((size_t)maxBlock_, 0.0f); fadeW_.assign((size_t)maxBlock_, 1.0f); fadeEngine_.reset(); fadePos_ = 0;
@@ -248,6 +251,8 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
     }
 
     const int inputChoice = (int)pInputCh_->load();
+    // a second plug fed from the RIGHT input channel: the first source is then the LEFT channel alone (they are two different guitars, not one mixed signal)
+    const bool dual = (int)pPlug2_->load() > 0 && (int)pPlug2Src_->load() == 1 && inCh > 1;
     int done = 0;
     float peak = 0.0f;
     while (done < total) {
@@ -257,17 +262,18 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
             float s = buffer.getReadPointer(0)[done + i];
             if (inCh > 1) {
                 const float r = buffer.getReadPointer(1)[done + i];
-                s = inputChoice == 1 ? s : (inputChoice == 2 ? r : 0.5f * (s + r));    // mean keeps a dual-mono source at its calibrated level
+                if (dual) monoIn2_[(size_t)i] = r;
+                else s = inputChoice == 1 ? s : (inputChoice == 2 ? r : 0.5f * (s + r));    // mean keeps a dual-mono source at its calibrated level
             }
             monoIn_[(size_t)i] = s;
             inHist_[(size_t)inHistPos_] = s; inHistPos_ = (inHistPos_ + 1) % kInHist;
         }
-        engine_->process(monoIn_.data(), outTerm_.data(), outAc_.data(), n);
+        engine_->process(monoIn_.data(), dual ? monoIn2_.data() : nullptr, outTerm_.data(), outAc_.data(), n);
         const bool fading = fadeEngine_ != nullptr;
         if (fading) {
             auto fp = params; fp.oversampleLog2 = fadeEngine_->params().oversampleLog2;
             fadeEngine_->setParams(fp);
-            fadeEngine_->process(monoIn_.data(), fadeTerm_.data(), fadeAc_.data(), n);
+            fadeEngine_->process(monoIn_.data(), dual ? monoIn2_.data() : nullptr, fadeTerm_.data(), fadeAc_.data(), n);
             for (int i = 0; i < n; ++i) {
                 const float w = std::min(1.0f, (float)(fadePos_ + i + 1) / (float)kFade);
                 fadeW_[(size_t)i] = w;

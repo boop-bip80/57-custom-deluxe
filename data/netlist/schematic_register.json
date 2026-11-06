@@ -222,6 +222,8 @@
     "extra_nodes": {
       "pu": "guitar pickup EMF node of the source chain (not on the drawing)",
       "tp": "source chain output (pickup + cable) that feeds the selected jack tip (not on the drawing)",
+      "pu2": "second source EMF node (a second plug: guitar or terminated cable; not on the drawing)",
+      "tp2": "second source chain output that feeds the second plug's jack tip (not on the drawing)",
       "sx": "speaker voice-coil resistance/inductance internal node (speaker equivalent, not on the drawing)",
       "sy": "speaker motional-branch node (speaker equivalent, not on the drawing)"
     },
@@ -276,7 +278,7 @@
       "J_SPK": "speaker jack contacts: the internal speaker is permanently connected (see speaker_equivalent)"
     },
     "extras": [
-      {"category": "source_chain", "names": ["Rsrc", "Lpu", "Ccab", "Rsel_b1", "Rsel_b2", "Rsel_n1", "Rsel_n2", "Rpt_b1b2", "Rpt_n1n2", "Rpt_b1n1", "Rpt_b1n2", "Rpt_b2n1", "Rpt_b2n2"], "allowed_evidence": ["PROP"], "touches_register_nets_only": ["BH_A", "BL_L", "NH_A", "NL_L", "GND"], "reason": "guitar source, cable and patch-cable options: a modelling boundary, not on the drawing"},
+      {"category": "source_chain", "names": ["Rsrc", "Lpu", "Ccab", "Rsel_b1", "Rsel_b2", "Rsel_n1", "Rsel_n2", "Rsrc2", "Lpu2", "Ccab2", "Rsel2_b1", "Rsel2_b2", "Rsel2_n1", "Rsel2_n2", "Rpt_b1b2", "Rpt_n1n2", "Rpt_b1n1", "Rpt_b1n2", "Rpt_b2n1", "Rpt_b2n2"], "allowed_evidence": ["PROP"], "touches_register_nets_only": ["BH_A", "BL_L", "NH_A", "NL_L", "GND"], "reason": "guitar source, cable and patch-cable options: a modelling boundary, not on the drawing"},
       {"category": "interelectrode", "pattern": "^C(gk|gp|pk)_", "allowed_evidence": ["DATASHEET"], "reason": "tube interelectrode capacitances: not on the drawing and not numerically in the dossier text; external datasheet-class values"},
       {"category": "load_option", "names": ["Rdum"], "allowed_evidence": ["PROP"], "touches_register_nets_only": ["SPK_HOT", "GND"], "reason": "resistive bench dummy load option (bench boundary, not on the drawing)"}
     ]

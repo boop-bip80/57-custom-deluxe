@@ -18,6 +18,8 @@ inline constexpr const char* micVol = "micVol";
 inline constexpr const char* tone = "tone";
 inline constexpr const char* jack = "jack";
 inline constexpr const char* patch = "patch";
+inline constexpr const char* plug2 = "plug2";          // second plug: none / Inst 1 / Inst 2 / Mic 1 / Mic 2
+inline constexpr const char* plug2Src = "plug2src";    // second plug source: terminated cable / right input channel
 inline constexpr const char* power = "power";
 inline constexpr const char* bypass = "bypass";
 inline constexpr const char* load = "load";
@@ -128,7 +130,7 @@ private:
     int maxBlock_ = 512;
     std::string netlist_, manifestText_, manifestSummary_, manifestError_;
 
-    std::vector<float> monoIn_, outTerm_, outAc_, irBuf_, coneBuf_;
+    std::vector<float> monoIn_, monoIn2_, outTerm_, outAc_, irBuf_, coneBuf_;
     // Two zero-latency partitioned convolvers sharing one background queue: route 1 (terminal voltage * IR) and route 2
     // (cone volume velocity * residual).  Only the active one is run; it is reset when its mode is selected.
     juce::dsp::ConvolutionMessageQueue irQueue_;
@@ -152,6 +154,8 @@ private:
     int blockCounter_ = 0;
     std::atomic<float>* pBypass_ = nullptr;
     std::atomic<float>* pInputCh_ = nullptr;
+    std::atomic<float>* pPlug2_ = nullptr;
+    std::atomic<float>* pPlug2Src_ = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CD57AudioProcessor)
 };

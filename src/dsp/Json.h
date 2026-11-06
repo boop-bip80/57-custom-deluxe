@@ -1,6 +1,7 @@
 // Json.h -- minimal JSON value + parser (objects, arrays, strings, numbers, bool, null).  No external dependency.
 #pragma once
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -24,6 +25,14 @@ struct Json {
     double number(const std::string& k, double dflt) const { auto* j = get(k); return j && j->isNumber() ? j->num : dflt; }
     std::string string(const std::string& k, const std::string& dflt = "") const { auto* j = get(k); return j && j->type == String ? j->str : dflt; }
 
+    // Serialise (compact, insertion order preserved).  Numbers use 17 significant digits so a parse/dump round trip is exact.
+    std::string dump() const
+    {
+        std::string o;
+        dumpTo(o);
+        return o;
+    }
+
     static Json parse(const std::string& s)
     {
         size_t i = 0;
@@ -34,6 +43,28 @@ struct Json {
     }
 
 private:
+    static void dumpString(const std::string& v, std::string& o)
+    {
+        o += '"';
+        for (char c : v) {
+            switch (c) {
+                case '"': o += "\\\""; break; case '\\': o += "\\\\"; break; case '\n': o += "\\n"; break; case '\t': o += "\\t"; break;
+                default: if ((unsigned char)c < 0x20) o += ' '; else o += c;
+            }
+        }
+        o += '"';
+    }
+    void dumpTo(std::string& o) const
+    {
+        switch (type) {
+            case Null: o += "null"; break;
+            case Bool: o += b ? "true" : "false"; break;
+            case Number: { char buf[40]; std::snprintf(buf, sizeof buf, "%.17g", num); o += buf; break; }
+            case String: dumpString(str, o); break;
+            case Array: o += '['; for (size_t i = 0; i < arr.size(); ++i) { if (i) o += ','; arr[i].dumpTo(o); } o += ']'; break;
+            case Object: o += '{'; for (size_t i = 0; i < obj.size(); ++i) { if (i) o += ','; dumpString(obj[i].first, o); o += ':'; obj[i].second.dumpTo(o); } o += '}'; break;
+        }
+    }
     static void skip(const std::string& s, size_t& i) { while (i < s.size() && std::isspace((unsigned char)s[i])) ++i; }
     static Json value(const std::string& s, size_t& i)
     {

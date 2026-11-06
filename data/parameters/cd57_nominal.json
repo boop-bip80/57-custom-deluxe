@@ -1,4 +1,36 @@
 {
+ "schema_version": 2,
+ "branches": {
+  "historical_5e3": {
+   "sources": [
+    "S03",
+    "S05",
+    "S10"
+   ],
+   "carried_by": "data/netlist/cd57_nominal.net (elements tagged HIST) and the historical_nominal manifest entries",
+   "note": "Original 5E3 topology and nominal values. Not modern manufacturing verification (Sec. 04)."
+  },
+  "reissue_2006": {
+   "sources": [
+    "S04"
+   ],
+   "carried_by": "NOTHING numeric: the service drawing 0073201000 Rev. B was not available to this implementation",
+   "note": "Earlier reissue generation. Its values must not be assigned to the modern unit automatically (Sec. 04, 14); a delta with branch 'reissue_2006' can carry them once the drawing is read."
+  },
+  "modern_nominal": {
+   "sources": [
+    "S01",
+    "S02"
+   ],
+   "carried_by": "manufacturer_documented, derived, assumed, proposed and candidate_fit entries",
+   "note": "The modern Custom Deluxe as far as public documents establish it, on top of the historical topology. This is the profile the plugin ships."
+  },
+  "specimen": {
+   "sources": [],
+   "carried_by": "a specimen delta merged with `cd57_manifest merge` (see data/parameters/specimen_delta_template.json); empty in the shipped manifest",
+   "note": "Measured values of one serial-numbered amplifier, stored beside the nominal ones, never instead of them."
+  }
+ },
  "target": "Fender 57 Custom Deluxe",
  "model_family": "815050",
  "pr_number": "PR 728",
@@ -20,96 +52,156 @@
    "unit": "W",
    "status": "manufacturer_documented",
    "source": "S01,S02",
-   "note": "into 8 ohm, <5% THD, 1 kHz; marketed as 12 W. Used as a calibration anchor and acceptance check."
+   "note": "into 8 ohm, <5% THD, 1 kHz; marketed as 12 W. Used as a calibration anchor and acceptance check.",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "rated_thd": {
    "value": 0.05,
    "unit": "fraction",
    "status": "manufacturer_documented",
-   "source": "S01,S02"
+   "source": "S01,S02",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "rated_thd_frequency": {
    "value": 1000.0,
    "unit": "Hz",
    "status": "manufacturer_documented",
-   "source": "S01,S02"
+   "source": "S01,S02",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "mains_power_draw": {
    "value": 85.0,
    "unit": "W",
    "status": "manufacturer_documented",
-   "source": "S01,S02"
+   "source": "S01,S02",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "speaker_nominal_impedance": {
    "value": 8.0,
    "unit": "ohm",
    "status": "manufacturer_documented",
-   "source": "S02"
+   "source": "S02",
+   "branch": "modern_nominal",
+   "source_revision": "S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "input1_impedance": {
    "value": 1000000.0,
    "unit": "ohm",
    "status": "manufacturer_documented",
    "source": "S01,S02",
-   "note": "reproduced by the jack network (checked in validation)"
+   "note": "reproduced by the jack network (checked in validation)",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "input2_impedance": {
    "value": 136000.0,
    "unit": "ohm",
    "status": "manufacturer_documented",
    "source": "S01,S02",
-   "note": "reproduced by the jack network (checked in validation)"
+   "note": "reproduced by the jack network (checked in validation)",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "input2_attenuation": {
    "value": -6.0,
    "unit": "dB",
    "status": "manufacturer_documented",
    "source": "S01,S02",
-   "note": "nominal"
+   "note": "nominal",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "tube_complement": {
    "value": "1x12AY7, 1x12AX7, 2x6V6, 1x5Y3",
    "unit": "-",
    "status": "manufacturer_documented",
    "source": "S01,S02",
-   "note": "manual prints 6V6GC, product page 6V6; installed marking must be recorded per specimen"
+   "note": "manual prints 6V6GC, product page 6V6; installed marking must be recorded per specimen",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "speaker_part": {
    "value": "Eminence Special Design alnico 12in, Fender PN 7708599000",
    "unit": "-",
    "status": "manufacturer_documented",
-   "source": "S01,S02,S11"
+   "source": "S01,S02,S11",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026; S02: Owner's Manual PN 7708607000 Rev. A (c) 2016; S11: Eminence speaker FAQ (OEM identification)",
+   "serial_range": null,
+   "uncertainty": null
   },
   "fuse_100_120V": {
    "value": "F2A L 250V",
    "unit": "-",
    "status": "manufacturer_documented",
-   "source": "S02"
+   "source": "S02",
+   "branch": "modern_nominal",
+   "source_revision": "S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "fuse_220_240V": {
    "value": "F1A L 250V",
    "unit": "-",
    "status": "manufacturer_documented",
-   "source": "S02"
+   "source": "S02",
+   "branch": "modern_nominal",
+   "source_revision": "S02: Owner's Manual PN 7708607000 Rev. A (c) 2016",
+   "serial_range": null,
+   "uncertainty": null
   },
   "rated_output_rms_voltage": {
    "value": 10.0,
    "unit": "V",
    "status": "derived",
    "source": "S01",
-   "note": "sqrt(12.5*8)"
+   "note": "sqrt(12.5*8)",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "rated_output_rms_current": {
    "value": 1.25,
    "unit": "A",
    "status": "derived",
-   "source": "S01"
+   "source": "S01",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "rated_output_peak_voltage_sine": {
    "value": 14.142,
    "unit": "V",
    "status": "derived",
-   "source": "S01"
+   "source": "S01",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "netlist": {
    "value": "data/netlist/cd57_nominal.net",
@@ -117,7 +209,11 @@
    "status": "historical_nominal",
    "source": "S03,S05",
    "note": "topology and component values are the historical 5E3 baseline; modern service schematic not authenticated (dossier Sec. 04)",
-   "verified_on_modern_specimen": false
+   "verified_on_modern_specimen": false,
+   "branch": "historical_5e3",
+   "source_revision": "S03: original Deluxe 5E3 schematic, archive copy (undated); S05: Rob Robinette, How the Fender 5E3 Deluxe Works (annotated schematic and layout, undated web page)",
+   "serial_range": null,
+   "uncertainty": null
   },
   "ot_turns_ratio_full_primary": {
    "value": 31.6227766,
@@ -125,7 +221,11 @@
    "status": "historical_nominal",
    "source": "S10",
    "note": "DRIVES THE MODEL: full-primary : secondary turns ratio, sqrt(8000/8) (dossier Sec. 12 prints 31.6228); FTDO-59 8k:8 class, identity with the modern OEM part unproven",
-   "verified_on_modern_specimen": false
+   "verified_on_modern_specimen": false,
+   "branch": "historical_5e3",
+   "source_revision": "S10: Mercury Magnetics FTDO-59 product page (historical 5E3 replacement, 8 kOhm : 8 Ohm)",
+   "serial_range": null,
+   "uncertainty": null
   },
   "pt_hv_half_winding_rms": {
    "value": 377.4,
@@ -136,7 +236,15 @@
     330.0,
     400.0
    ],
-   "note": "supply transformer parameters UNKNOWN; value CALIBRATED (cd57_validate --calibrate-pt) so the interpolated 5% THD power into 8 ohm equals the documented 12.5 W for the JJ-fitted tube laws; the anchor weakly constrains this value (see the sensitivity table in the validation report)"
+   "note": "supply transformer parameters UNKNOWN; value CALIBRATED (cd57_validate --calibrate-pt) so the interpolated 5% THD power into 8 ohm equals the documented 12.5 W for the JJ-fitted tube laws; the anchor weakly constrains this value (see the sensitivity table in the validation report)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 330.0,
+    "hi": 400.0
+   }
   },
   "pt_series_resistance_per_half": {
    "value": 90.0,
@@ -146,7 +254,15 @@
     50.0,
     150.0
    ],
-   "note": "PT secondary + reflected primary resistance"
+   "note": "PT secondary + reflected primary resistance",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 50.0,
+    "hi": 150.0
+   }
   },
   "ot_primary_inductance_full": {
    "value": 25.5,
@@ -156,7 +272,15 @@
     10.0,
     60.0
    ],
-   "note": "DRIVES THE MODEL: small-signal magnetising inductance of the full primary, secondary open, = N_full^2 (P0 + Pair) with the netlist's Pair = 0.5 mH (so the netlist's P0 = 25 mH <-> 25.5 H); value is a guess, not a measurement"
+   "note": "DRIVES THE MODEL: small-signal magnetising inductance of the full primary, secondary open, = N_full^2 (P0 + Pair) with the netlist's Pair = 0.5 mH (so the netlist's P0 = 25 mH <-> 25.5 H); value is a guess, not a measurement",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 10.0,
+    "hi": 60.0
+   }
   },
   "ot_leakage_inductance_full_ref": {
    "value": 0.04,
@@ -166,7 +290,15 @@
     0.01,
     0.08
    ],
-   "note": "DRIVES THE MODEL: total leakage referred to the full primary = Lla + Llb + n^2 Lls; the netlist's split between windings is kept in proportion"
+   "note": "DRIVES THE MODEL: total leakage referred to the full primary = Lla + Llb + n^2 Lls; the netlist's split between windings is kept in proportion",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.01,
+    "hi": 0.08
+   }
   },
   "ot_dcr_primary_half": {
    "value": 125.0,
@@ -176,7 +308,15 @@
     80.0,
     200.0
    ],
-   "note": "DRIVES THE MODEL: DC resistance of one primary half (Ra = Rb)"
+   "note": "DRIVES THE MODEL: DC resistance of one primary half (Ra = Rb)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 80.0,
+    "hi": 200.0
+   }
   },
   "ot_dcr_secondary": {
    "value": 0.35,
@@ -186,7 +326,15 @@
     0.2,
     0.6
    ],
-   "note": "DRIVES THE MODEL"
+   "note": "DRIVES THE MODEL",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.2,
+    "hi": 0.6
+   }
   },
   "ot_core_saturation_flux_per_secondary_turn": {
    "value": 0.06,
@@ -196,37 +344,98 @@
     0.04,
     0.09
    ],
-   "note": "no public saturation data (dossier Sec. 12)"
+   "note": "no public saturation data (dossier Sec. 12)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.04,
+    "hi": 0.09
+   }
   },
   "tube_interelectrode_capacitances": {
    "value": "12AX7/12AY7 1.5-1.7/1.5-1.7/0.46-0.5 pF, 6V6 9.5/0.7/7.5 pF",
    "unit": "pF",
    "status": "assumed",
-   "note": "datasheet-class values that are NOT contained in the dossier text (external, unverified offline)"
+   "note": "datasheet-class values that are NOT contained in the dossier text (external, unverified offline)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "triode_grid_conduction_law": {
    "value": "I=k*(s*softplus((vgk-vc)/s))^1.5 (k=0.35 mA/V^1.5, vc=-0.5 V, s=0.15 V)",
    "unit": "-",
    "status": "assumed",
-   "note": "no grid-current data for the 12AY7/12AX7 in the dossier; onset and slope need measurements (dossier Sec. 16)"
+   "note": "no grid-current data for the 12AY7/12AX7 in the dossier; onset and slope need measurements (dossier Sec. 16)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "volume_pot_taper": {
    "value": null,
    "unit": "fraction_vs_angle",
    "status": "unknown",
    "source": "S01",
-   "note": "manufacturer advertises revised tapers; numerical law not located"
+   "note": "manufacturer advertises revised tapers; numerical law not located. The measured maps go in the three per-pot entries below",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
+  },
+  "volume_pot_taper_instrument": {
+   "value": null,
+   "unit": "fraction_vs_angle_11pt",
+   "status": "unknown",
+   "source": "S01",
+   "note": "Instrument volume. MEASURED MAP (dossier Sec. 08/28): electrical fraction alpha = R(grounded end -> wiper) / R_total at knob rotation 0, 0.1, ..., 1.0 (11 values, monotonic, 0..1), from a resistance-versus-angle measurement; a valid map replaces the assumed taper",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
+  },
+  "volume_pot_taper_mic": {
+   "value": null,
+   "unit": "fraction_vs_angle_11pt",
+   "status": "unknown",
+   "source": "S01",
+   "note": "Mic volume. MEASURED MAP (dossier Sec. 08/28): electrical fraction alpha = R(grounded end -> wiper) / R_total at knob rotation 0, 0.1, ..., 1.0 (11 values, monotonic, 0..1), from a resistance-versus-angle measurement; a valid map replaces the assumed taper",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
+  },
+  "tone_pot_taper": {
+   "value": null,
+   "unit": "fraction_vs_angle_11pt",
+   "status": "unknown",
+   "source": "S01",
+   "note": "Tone pot: alpha measured from the 5 nF end to the wiper. MEASURED MAP (dossier Sec. 08/28): electrical fraction alpha = R(grounded end -> wiper) / R_total at knob rotation 0, 0.1, ..., 1.0 (11 values, monotonic, 0..1), from a resistance-versus-angle measurement; a valid map replaces the assumed taper",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "volume_pot_taper_provisional": {
    "value": "audio, alpha(0.5)=0.15",
    "unit": "-",
    "status": "assumed",
-   "note": "selectable in the plugin (audio-15 / audio-10 / linear); not claimed as the modern Fender taper"
+   "note": "selectable in the plugin (audio-15 / audio-10 / linear); not claimed as the modern Fender taper",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "tone_pot_taper_provisional": {
    "value": "linear",
    "unit": "-",
-   "status": "assumed"
+   "status": "assumed",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "pot_total_resistance": {
    "value": 1000000.0,
@@ -236,13 +445,25 @@
    "interval": [
     800000.0,
     1200000.0
-   ]
+   ],
+   "branch": "historical_5e3",
+   "source_revision": "S03: original Deluxe 5E3 schematic, archive copy (undated)",
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 800000.0,
+    "hi": 1200000.0
+   }
   },
   "pot_endpoint_contact_resistance": {
    "value": 20.0,
    "unit": "ohm",
    "status": "proposed",
-   "note": "documented small contact resistance instead of dividing by zero (dossier Sec. 08)"
+   "note": "documented small contact resistance instead of dividing by zero (dossier Sec. 08)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "speaker_Re": {
    "value": 6.4,
@@ -252,7 +473,15 @@
     5.5,
     7.2
    ],
-   "note": "exact-target value UNKNOWN (dossier manifest example lists null)"
+   "note": "exact-target value UNKNOWN (dossier manifest example lists null)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 5.5,
+    "hi": 7.2
+   }
   },
   "speaker_Le": {
    "value": 0.0007,
@@ -261,7 +490,15 @@
    "interval": [
     0.0003,
     0.0012
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.0003,
+    "hi": 0.0012
+   }
   },
   "speaker_fs": {
    "value": 98.0,
@@ -270,7 +507,15 @@
    "interval": [
     75.0,
     120.0
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 75.0,
+    "hi": 120.0
+   }
   },
   "speaker_Qms": {
    "value": 5.5,
@@ -279,7 +524,15 @@
    "interval": [
     3.0,
     9.0
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 3.0,
+    "hi": 9.0
+   }
   },
   "speaker_Qes": {
    "value": 1.0,
@@ -288,7 +541,15 @@
    "interval": [
     0.6,
     1.6
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.6,
+    "hi": 1.6
+   }
   },
   "speaker_Mms": {
    "value": 0.0195,
@@ -297,7 +558,15 @@
    "interval": [
     0.012,
     0.03
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.012,
+    "hi": 0.03
+   }
   },
   "speaker_Sd": {
    "value": 0.05,
@@ -306,13 +575,25 @@
    "interval": [
     0.045,
     0.055
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.045,
+    "hi": 0.055
+   }
   },
   "speaker_voice_coil_tempco": {
    "value": 0.00393,
    "unit": "1/K",
    "status": "proposed",
-   "note": "copper; conductor not verified (dossier Sec. 18)"
+   "note": "copper; conductor not verified (dossier Sec. 18)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "speaker_thermal_Cth": {
    "value": 8.0,
@@ -322,7 +603,15 @@
     3.0,
     20.0
    ],
-   "note": "single compartment"
+   "note": "single compartment",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 3.0,
+    "hi": 20.0
+   }
   },
   "speaker_thermal_Rth": {
    "value": 6.0,
@@ -331,25 +620,45 @@
    "interval": [
     3.0,
     12.0
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 3.0,
+    "hi": 12.0
+   }
   },
   "speaker_Bl_of_x_and_Kms_of_x": {
    "value": null,
    "unit": "curves",
    "status": "unknown",
-   "note": "large-signal speaker nonlinearity not modelled (no data)"
+   "note": "large-signal speaker nonlinearity not modelled (no data)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "cabinet_internal_geometry": {
    "value": null,
    "unit": "-",
    "status": "unknown",
    "source": "S01",
-   "note": "no dimensioned drawing located"
+   "note": "no dimensioned drawing located",
+   "branch": "modern_nominal",
+   "source_revision": "S01: Fender product page and photographs, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "cabinet_microphone_room_chain": {
    "value": null,
    "unit": "-",
-   "status": "unknown"
+   "status": "unknown",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "acoustic_path_difference": {
    "value": 0.42,
@@ -359,7 +668,15 @@
     0.25,
     0.7
    ],
-   "note": "PROVISIONAL open-back dipole path difference"
+   "note": "PROVISIONAL open-back dipole path difference",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.25,
+    "hi": 0.7
+   }
   },
   "acoustic_rear_level": {
    "value": 0.8,
@@ -368,7 +685,15 @@
    "interval": [
     0.5,
     1.0
-   ]
+   ],
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.5,
+    "hi": 1.0
+   }
   },
   "acoustic_cone_rolloff": {
    "value": 5200.0,
@@ -378,7 +703,15 @@
     3500.0,
     7000.0
    ],
-   "note": "PROVISIONAL generic 12in driver"
+   "note": "PROVISIONAL generic 12in driver",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 3500.0,
+    "hi": 7000.0
+   }
   },
   "acoustic_presence_peak": {
    "value": {
@@ -388,7 +721,11 @@
    },
    "unit": "-",
    "status": "assumed",
-   "note": "PROVISIONAL cone-mode proxy; not PN 7708599000"
+   "note": "PROVISIONAL cone-mode proxy; not PN 7708599000",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "tube_12AY7_koren": {
    "value": {
@@ -401,7 +738,11 @@
    "unit": "Koren",
    "status": "candidate_fit",
    "source": "S21,S24",
-   "note": "fitted to 1313 pixel-digitised points of the JJ transfer + plate sheet; operating region (Vp 50-350 V, Vg -6..0 V): rms 0.063 mA, relative 5.1 % (tail-dominated); whole held-out curves and cross-panel prediction in data/tubes/fitted_models.json; local mu/rp/gm at the RCA point differ from the RCA numbers the dossier quotes (a JJ-vs-RCA data difference, not forced); no specimen curve-traced; grid conduction ASSUMED"
+   "note": "fitted to 1313 pixel-digitised points of the JJ transfer + plate sheet; operating region (Vp 50-350 V, Vg -6..0 V): rms 0.063 mA, relative 5.1 % (tail-dominated); whole held-out curves and cross-panel prediction in data/tubes/fitted_models.json; local mu/rp/gm at the RCA point differ from the RCA numbers the dossier quotes (a JJ-vs-RCA data difference, not forced); no specimen curve-traced; grid conduction ASSUMED",
+   "branch": "modern_nominal",
+   "source_revision": "S21: JJ Electronic 12AY7 characteristic sheet, retrieved 5 Nov 2026; S24: JJ Electronic ECC83S / 12AX7 characteristic sheet, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "tube_12AX7_koren": {
    "value": {
@@ -414,7 +755,11 @@
    "unit": "Koren",
    "status": "candidate_fit",
    "source": "S21,S24",
-   "note": "fitted to 910 pixel-digitised points of the JJ transfer + plate sheet; operating region (Vp 50-350 V, Vg -6..0 V): rms 0.050 mA, relative 4.8 % (tail-dominated); whole held-out curves and cross-panel prediction in data/tubes/fitted_models.json; local mu/rp/gm at the RCA point differ from the RCA numbers the dossier quotes (a JJ-vs-RCA data difference, not forced); no specimen curve-traced; grid conduction ASSUMED"
+   "note": "fitted to 910 pixel-digitised points of the JJ transfer + plate sheet; operating region (Vp 50-350 V, Vg -6..0 V): rms 0.050 mA, relative 4.8 % (tail-dominated); whole held-out curves and cross-panel prediction in data/tubes/fitted_models.json; local mu/rp/gm at the RCA point differ from the RCA numbers the dossier quotes (a JJ-vs-RCA data difference, not forced); no specimen curve-traced; grid conduction ASSUMED",
+   "branch": "modern_nominal",
+   "source_revision": "S21: JJ Electronic 12AY7 characteristic sheet, retrieved 5 Nov 2026; S24: JJ Electronic ECC83S / 12AX7 characteristic sheet, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "tube_6V6_pentode": {
    "value": {
@@ -431,7 +776,11 @@
    "unit": "Koren (Kvb form) + screen partition",
    "status": "candidate_fit",
    "source": "S22",
-   "note": "cathode-current law fitted to the digitised JJ 6V6S sheet (assumed triode-connected, Ia = plate+screen): amp region rms 2.67 mA / 7.1 % relative, positive-grid region 19.5 %; screen partition fs0 and Early voltage va come from an EXTERNAL RCA 6V6GT rating point that is NOT in the dossier; knee shape vk, q ASSUMED"
+   "note": "cathode-current law fitted to the digitised JJ 6V6S sheet (assumed triode-connected, Ia = plate+screen): amp region rms 2.67 mA / 7.1 % relative, positive-grid region 19.5 %; screen partition fs0 and Early voltage va come from an EXTERNAL RCA 6V6GT rating point that is NOT in the dossier; knee shape vk, q ASSUMED",
+   "branch": "modern_nominal",
+   "source_revision": "S22: JJ Electronic 6V6S characteristic sheet, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "tube_6V6_grid_conduction": {
    "value": {
@@ -443,7 +792,11 @@
    "unit": "saturating power law",
    "status": "candidate_fit",
    "source": "S22",
-   "note": "plateau digitised from the JJ 6V6S dashed Ig curves (Ug=+5 V: 7.9 mA, +20 V: 12.2 mA at Ua 150-350 V); onset (vc, sg) ASSUMED; Ig dependence on plate voltage below 100 V not modelled"
+   "note": "plateau digitised from the JJ 6V6S dashed Ig curves (Ug=+5 V: 7.9 mA, +20 V: 12.2 mA at Ua 150-350 V); onset (vc, sg) ASSUMED; Ig dependence on plate voltage below 100 V not modelled",
+   "branch": "modern_nominal",
+   "source_revision": "S22: JJ Electronic 6V6S characteristic sheet, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "rectifier_5Y3_forward": {
    "value": {
@@ -453,7 +806,11 @@
    "unit": "mA",
    "status": "candidate_fit",
    "source": "S23",
-   "note": "per-anode forward law fitted to the digitised JJ 5Y3S right panel (dashed branch is the manufacturer's extrapolation); in-circuit regulation check against the left panel: tools/validate_supply.cpp"
+   "note": "per-anode forward law fitted to the digitised JJ 5Y3S right panel (dashed branch is the manufacturer's extrapolation); in-circuit regulation check against the left panel: tools/validate_supply.cpp",
+   "branch": "modern_nominal",
+   "source_revision": "S23: JJ Electronic 5Y3S characteristic sheet, retrieved 5 Nov 2026",
+   "serial_range": null,
+   "uncertainty": null
   },
   "calibration_volts_per_full_scale_input_sample": {
    "value": 1.0,
@@ -463,13 +820,25 @@
     0.1,
     5.0
    ],
-   "note": "user-adjustable 'Input Cal'; NOT a Fender specification"
+   "note": "user-adjustable 'Input Cal'; NOT a Fender specification",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.1,
+    "hi": 5.0
+   }
   },
   "calibration_output_samples_per_volt": {
    "value": 0.03536,
    "unit": "1/V",
    "status": "proposed",
-   "note": "0 dBFS = 28.28 V peak at the speaker terminals (rated 12.5 W sine, 14.14 V peak = -6 dBFS)"
+   "note": "0 dBFS = 28.28 V peak at the speaker terminals (rated 12.5 W sine, 14.14 V peak = -6 dBFS)",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": null
   },
   "source_impedance": {
    "value": 100.0,
@@ -479,7 +848,15 @@
     0.0,
     10000.0
    ],
-   "note": "line/DI default; pickup+cable model optional"
+   "note": "line/DI default; pickup+cable model optional",
+   "branch": "modern_nominal",
+   "source_revision": null,
+   "serial_range": null,
+   "uncertainty": {
+    "kind": "sensitivity_interval",
+    "lo": 0.0,
+    "hi": 10000.0
+   }
   }
  }
 }

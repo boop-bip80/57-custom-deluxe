@@ -9,7 +9,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -103,7 +105,7 @@ struct Rig {
     double sr;
     int latency = 0;
     int block;
-    std::vector<float> in, ot, oa;
+    std::vector<float> in, in2, ot, oa;
 
     explicit Rig(const EngineParams& p, double sampleRate = 48000.0, int maxBlock = 512, const std::string& manifestOverride = std::string())
         : sr(sampleRate), block(maxBlock), in((size_t)maxBlock), ot((size_t)maxBlock), oa((size_t)maxBlock)
@@ -117,15 +119,21 @@ struct Rig {
 
     // Jack volts in -> terminal volts (and optionally amps) out, the SAME length as the input, with the fixed oversampler latency removed.
     // onBlock(endIndex) is called after every block with the number of input samples consumed so far (probing of internal nodes).
-    Vec run(const Vec& jackVolts, Vec* current = nullptr, const std::function<void(size_t)>& onBlock = nullptr)
+    // jackVolts2 (optional, same length) drives the SECOND plug (EngineParams::jack2); null = the second plug, if any, is a terminated cable.
+    Vec run(const Vec& jackVolts, Vec* current = nullptr, const std::function<void(size_t)>& onBlock = nullptr, const Vec* jackVolts2 = nullptr)
     {
         const size_t n = jackVolts.size(), total = n + (size_t)latency;
         Vec out(total, 0.0), cur(current ? total : 0, 0.0);
         const double ki = kIn(), ko = kOutVolts();
+        if (jackVolts2 && in2.size() != in.size()) in2.assign(in.size(), 0.f);
         for (size_t i = 0; i < total; i += (size_t)block) {
             const int m = (int)std::min<size_t>((size_t)block, total - i);
-            for (int k = 0; k < m; ++k) in[(size_t)k] = i + (size_t)k < n ? (float)(jackVolts[i + (size_t)k] / ki) : 0.f;
-            e.process(in.data(), ot.data(), oa.data(), m);
+            for (int k = 0; k < m; ++k) {
+                const size_t j = i + (size_t)k;
+                in[(size_t)k] = j < n ? (float)(jackVolts[j] / ki) : 0.f;
+                if (jackVolts2) in2[(size_t)k] = j < n && j < jackVolts2->size() ? (float)((*jackVolts2)[j] / ki) : 0.f;
+            }
+            e.process(in.data(), jackVolts2 ? in2.data() : nullptr, ot.data(), oa.data(), m);
             for (int k = 0; k < m; ++k) out[i + (size_t)k] = (double)ot[(size_t)k] * ko;
             if (current) { const auto& ib = e.terminalCurrentBlock(); for (int k = 0; k < m; ++k) cur[i + (size_t)k] = ib[(size_t)k]; }
             if (onBlock) onBlock(std::min(n, i + (size_t)m));
