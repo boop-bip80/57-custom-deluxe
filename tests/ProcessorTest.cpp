@@ -125,12 +125,14 @@ int main()
         }
         // missing IR file: the state keeps the reference, and the mode falls back to the speaker terminals (documented), no crash
         {
-            applyState(2, "/nonexistent/cd57/missing_ir.wav");
+            // a native absolute path that does not exist: JUCE normalises paths, and on Windows a leading '/' is not absolute, so a POSIX literal would be rewritten
+            const String missingPath = File::getSpecialLocation(File::tempDirectory).getChildFile("cd57_no_such_directory").getChildFile("missing_ir.wav").getFullPathName();
+            applyState(2, missingPath);
             const auto y = render(burst);
             float worst = 0; for (size_t i = 0; i < y.size(); ++i) worst = std::max(worst, std::fabs(y[i] - term[i]));
             MemoryBlock b; inst->getStateInformation(b);
             auto xml = AudioProcessor::getXmlFromBinary(b.getData(), (int)b.getSize());
-            CHECK(worst < 1e-6f && xml->getStringAttribute("irPath") == "/nonexistent/cd57/missing_ir.wav", "missing IR file: output falls back to the speaker terminals and the saved state still names the file");
+            CHECK(worst < 1e-6f && xml->getStringAttribute("irPath") == missingPath, "missing IR file: output falls back to the speaker terminals and the saved state still names the file");
         }
         // hybrid (mode 3) vs route 1 (mode 2) with a physical IR: -0.8, 1 ms delay, 2nd-order 60 Hz high-pass (finite energy at DC)
         {
