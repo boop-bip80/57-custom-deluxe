@@ -63,6 +63,7 @@ struct AmpConfig {
     double lineScale = 1.0;                  // line voltage relative to nominal (Variac)
     RectifierType rectifier = RectifierType::Tube5Y3;
     std::string v1Type = "12AY7", v2Type = "12AX7";
+    bool otSaturation = false;               // optional lab feature: ASSUMED output-transformer saturation law (default OFF, dossier Sec. 12/29)
     double potTotal = 1.0e6;
     PotMap volumeMap, toneMap;
     SpeakerTS speaker;
@@ -175,7 +176,10 @@ public:
 
     // ---- ports ---------------------------------------------------------------------------------
     double vTerminal() const { return net_->V(sp_); }
-    double speakerCurrent() const { return (net_->V(sp_) - net_->V(sx_)) / (voiceCoilR_); }
+    // current into the voice coil (zero when the coil is disconnected, i.e. in the resistive dummy-load modes)
+    double speakerCurrent() const { return (net_->V(sp_) - net_->V(sx_)) / rRe_; }
+    // total current delivered into the load at the speaker terminals (dossier Sec. 05: expose terminal voltage AND current)
+    double terminalCurrent() const { return speakerCurrent() + net_->V(sp_) / rDum_ + net_->V(sp_) / rExt_; }
     double coneVelocity() const { return net_->V(sy_) / Bl_; }
     double nodeV(const char* name) const { return net_->V(net_->nodeId(name)); }
     Network& network() { return *net_; }
@@ -238,6 +242,7 @@ public:
             case LoadMode::Dummy16: rdum = 16.0; re = OFF; break;
         }
         n.setR(R_re_, re); n.setR(R_dum_, rdum); n.setR(R_ext_, rext);
+        rRe_ = re; rDum_ = rdum; rExt_ = rext;
         load_g_ = 1.0 / (rdum) + 1.0 / rext;
         mainsTarget_ = cur_.power ? 1.0 : 0.0;
         n.refreshIfDirty();
@@ -251,7 +256,7 @@ public:
     void setVoiceCoilResistance(double Re)
     {
         voiceCoilR_ = Re;
-        if (cur_.load == LoadMode::Speaker || cur_.load == LoadMode::SpeakerPlusExt8) { net_->setR(R_re_, Re); net_->refreshLinear(); }
+        if (cur_.load == LoadMode::Speaker || cur_.load == LoadMode::SpeakerPlusExt8) { net_->setR(R_re_, Re); rRe_ = Re; net_->refreshLinear(); }
     }
 
     void setSmoothing(double coefPerCall) { smoothCoef_ = coefPerCall; }
@@ -301,6 +306,7 @@ private:
         }
         srcG_ = 1.0 / n.getR(R_src_);
         n.setR(n.resId("Rs_a"), cfg.ptRs); n.setR(n.resId("Rs_b"), cfg.ptRs);
+        n.setCoreSaturation(cfg.otSaturation);
         if (cfg.mainsHz < 40.0) cfg.mainsHz = 50.0;
         // speaker electrical equivalent (dossier Sec. 17)
         const SpeakerTS& s = cfg.speaker;
@@ -352,6 +358,7 @@ private:
     AmpControls target_, cur_;
     double smoothCoef_ = 0.2, mainsGain_ = 1.0, mainsTarget_ = 1.0, emTube_ = 1.0, emRect_ = 1.0;
     double Bl_ = 1.0, voiceCoilR_ = 6.4, load_g_ = 0.0, srcG_ = 0.01, noiseDensityV_ = 0.0;
+    double rRe_ = 6.4, rDum_ = 1e11, rExt_ = 1e11;     // resistances presently set on the voice-coil / dummy / extension branches
     int pu_, sp_, sx_, sy_, ra_, rb_, k1_;
     int R_vb_lo_, R_vb_hi_, R_vn_lo_, R_vn_hi_, R_t_a_, R_t_b_, R_sw_b1_, R_sw_b2_, R_sw_n1_, R_sw_n2_;
     int R_sel_[4], R_pt_[6], R_src_, L_pu_, C_cab_, R_re_, R_dum_, R_ext_, L_le_, R_es_, C_mes_, L_ces_, R_k1_;

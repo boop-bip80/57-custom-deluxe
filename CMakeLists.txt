@@ -69,6 +69,10 @@ if(CD57_BUILD_TOOLS)
     target_link_libraries(validate_tubes PRIVATE cd57_core)
     target_compile_definitions(validate_tubes PRIVATE CD57_DIGITIZED_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data/tubes/digitized")
     add_test(NAME tube_device_laws COMMAND validate_tubes)
+    # --- realtime / robustness tests ---
+    add_executable(validate_realtime tools/validate_realtime.cpp)
+    target_link_libraries(validate_realtime PRIVATE cd57_core)
+    add_test(NAME realtime_robustness COMMAND validate_realtime)
     # --- acoustic tests ---
     add_executable(validate_acoustic tools/validate_acoustic.cpp)
     target_link_libraries(validate_acoustic PRIVATE cd57_core)

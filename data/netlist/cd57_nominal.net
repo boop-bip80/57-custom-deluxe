@@ -120,8 +120,10 @@ C Ck34 k34 0 25u tol=0.20 ev=HIST src=S03
 
 # ===== Output transformer: centre-tapped primary, flux-state core (dossier Sec. 12).  n(full)=sqrt(1000)=31.6228 (8k:8) 
 # UNKNOWN for the modern OEM part: ratio/inductances below are the FTDO-59 class (S10) plus ASSUMED parasitics.
+# sat=0: the core is LINEAR by default (dossier Sec. 12, 29: no saturation law before evidence exists).  sat=1 (engine option
+# 'OT core saturation') enables the ASSUMED law phi = phisat tanh(P0 F/phisat) + Pair F; phisat is an unmeasured guess.
 # Windings: A = P3->CT, B = CT->P4, S = secondary hot->ground.  Ns = 1 (all turns secondary-referred).
-XFMR OT a1=p3 a2=b1 b1=b1 b2=p4 s1=sp s2=0 Nh=15.8113883 Ns=1 Ra=125 Rb=125 Rs=0.35 Lla=8m Llb=8m Lls=24u P0=25m phisat=0.060 Pair=0.5m ev=ASSUMED src=S10 note=FTDO-59_class_ratio_(aftermarket_spec_S10,_not_OEM_evidence);_R,Ll,Lm,Bsat_ASSUMED
+XFMR OT a1=p3 a2=b1 b1=b1 b2=p4 s1=sp s2=0 Nh=15.8113883 Ns=1 Ra=125 Rb=125 Rs=0.35 Lla=8m Llb=8m Lls=24u P0=25m phisat=0.060 Pair=0.5m sat=0 ev=ASSUMED src=S10 note=FTDO-59_class_ratio_(aftermarket_spec_S10,_not_OEM_evidence);_R,Ll,Lm,Bsat_ASSUMED
 
 # ===== Loudspeaker electrical model (dossier Sec. 17): u = Re i + Le di/dt + Bl v ; motional impedance as parallel RLC
 # PN 7708599000 parameters are UNKNOWN -> generic 12-inch alnico guitar-driver ASSUMED values (set from manifest)

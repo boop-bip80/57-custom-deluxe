@@ -58,6 +58,7 @@ public:
         double N[3];                   // turns (secondary-referred: Ns = 1)
         double R[3], Ll[3];            // winding resistance, leakage inductance
         double P0, phiSat, Pair;       // core permeance, saturation flux per turn, post-saturation permeance
+        bool satOn = false;            // saturating law active?  default OFF: dossier Sec. 12/29 (no saturation law before evidence)
         int row[3];                    // unknown index of each winding current
         int slotRowNode[3][2];         // (row_k, n1) (row_k, n2)
         int slotNodeRow[3][2];         // (n1,row_k) (n2,row_k)
@@ -183,6 +184,11 @@ public:
         z_.assign(N_, 0.0); zprev_.assign(N_, 0.0); zprev2_.assign(N_, 0.0); zprev3_.assign(N_, 0.0);
         b_.assign(N_, 0.0); F_.assign(N_, 0.0); dz_.assign(N_, 0.0);
         inj_.assign(nn_, 0.0);
+        // everything step() / newton() / the sub-step fallback touch is sized here, so the audio thread never allocates
+        zOld_.assign(N_, 0.0); dzOld_.assign(N_, 0.0);
+        injOld_ = inj_; injNew_.assign(nn_, 0.0);
+        failHist.assign(N_, 0);
+        snapshot(snap_);
         // slot->(row,col) inverse for linear matvec
         slotRow_.assign(nnz_, -1); slotCol_.assign(nnz_, -1);
         for (int i = 0; i < N_; ++i) for (int j = 0; j < N_; ++j) { int s = lu_.slot(i, j); if (s >= 0) { slotRow_[s] = i; slotCol_[s] = j; } }
@@ -209,6 +215,10 @@ public:
     Stats stats;
     int maxIter = 20;
     double absTolV = 1e-2, relTol = 1e-4;
+    // Nodal KCL acceptance threshold (amperes).  The step-size test above scales with the absolute node potential, which is blind to
+    // stiff devices at high common-mode voltage (1e-4 * 457 V = 46 mV is one e-fold of a silicon diode's current), so a solve is
+    // accepted only if the nodal residual is also below this value.  Normal operation sits 2-3 decades below it.
+    double resTolA = 2e-5;
     double stepLimitV = 400.0, gridStepLimit = 120.0;
     double predictorGain = 1.0;
     int predictorOrder = 2;                 // 1 = linear, 2 = quadratic extrapolation of the previous accepted states
@@ -291,8 +301,10 @@ public:
         // ---- fallback: adaptive sub-stepping from the last accepted state
         ++stats.substepped;
         z_ = zprev_;
-        Snapshot S0; snapshot(S0);
-        const std::vector<double> injNew = inj_;
+        Snapshot& S0 = snap_;                    // preallocated in build(): this path runs on the audio thread
+        snapshot(S0);
+        injNew_ = inj_;
+        const std::vector<double>& injNew = injNew_;
         bool done = false;
         for (int idx = 1; idx < kDivs && !done; ++idx) {
             restore(S0);
@@ -314,7 +326,6 @@ public:
             // unrecoverable: hold the last accepted state (bounded fallback) and COUNT it
             restore(S0);
             ++stats.failures;
-            if (failHist.size() != (size_t)N_) failHist.assign(N_, 0);
             int worst = 0; double wv = 0;
             for (int i = 0; i < N_; ++i) if (std::fabs(dz_[i]) > wv) { wv = std::fabs(dz_[i]); worst = i; }
             ++failHist[worst];
@@ -452,16 +463,32 @@ public:
         if (hasXfm_) for (int k = 0; k < 3; ++k) { xfm_.lamPrev[k] = xfm_.lamDotPrev[k] = 0; xfm_.i[k] = 0; }
     }
 
-    // saturating core law:  phi(F) = phiSat*tanh(P0 F/phiSat) + Pair F
+    // Core law.  Default (dossier Sec. 12, 29: "begin with ... a magnetizing branch", "do not assign a saturation law before the
+    // evidence is available"): linear, phi(F) = (P0 + Pair) F -- the exact small-signal limit of the saturating law, so the low-level
+    // response is identical.  Optional lab feature (ASSUMED law, ASSUMED phiSat): phi(F) = phiSat tanh(P0 F/phiSat) + Pair F.
     double corePhi(double F) const
     {
+        if (!xfm_.satOn) return (xfm_.P0 + xfm_.Pair) * F;
         return xfm_.phiSat * std::tanh(xfm_.P0 * F / xfm_.phiSat) + xfm_.Pair * F;
     }
     double corePhiPrime(double F) const
     {
+        if (!xfm_.satOn) return xfm_.P0 + xfm_.Pair;
         const double t = std::tanh(xfm_.P0 * F / xfm_.phiSat);
         return xfm_.P0 * (1.0 - t * t) + xfm_.Pair;
     }
+    // Switch the saturating law on/off at run time without a flux discontinuity: the winding flux linkages are re-derived from
+    // the present winding currents under the new law.
+    void setCoreSaturation(bool on)
+    {
+        if (!hasXfm_ || xfm_.satOn == on) return;
+        xfm_.satOn = on;
+        double F = 0;
+        for (int k = 0; k < 3; ++k) F += xfm_.N[k] * xfm_.i[k];
+        const double phi = corePhi(F);
+        for (int k = 0; k < 3; ++k) xfm_.lamPrev[k] = xfm_.Ll[k] * xfm_.i[k] + xfm_.N[k] * phi;
+    }
+    bool coreSaturation() const { return hasXfm_ && xfm_.satOn; }
 
     // ------------------------------------------------------------------ introspection (netlist doc)
     std::string describe() const
@@ -606,6 +633,7 @@ private:
             x.R[0] = parseValue(g("Ra")); x.R[1] = parseValue(g("Rb")); x.R[2] = parseValue(g("Rs"));
             x.Ll[0] = parseValue(g("Lla")); x.Ll[1] = parseValue(g("Llb")); x.Ll[2] = parseValue(g("Lls"));
             x.P0 = parseValue(g("P0")); x.phiSat = parseValue(g("phisat")); x.Pair = parseValue(g("Pair"));
+            x.satOn = kv.count("sat") && parseValue(kv["sat"]) != 0.0;     // optional key; absent = linear core
             xfm_ = x; hasXfm_ = true;
         } else {
             throw std::runtime_error("unknown element type " + type);
@@ -783,7 +811,6 @@ private:
         lastIterations = 0;
         double meritPrev = 0.0, etaPrev = 1.0;
         bool havePrev = false;
-        zOld_.resize(N_);
         for (int it = 0; it < maxIt; ++it) {
             auto T0 = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
             evalSystem(dc, true);
@@ -831,12 +858,17 @@ private:
             ++lastIterations; ++stats.iterations;
             if ((uint64_t)lastIterations > stats.maxIterSeen) stats.maxIterSeen = lastIterations;
             if (conv) {
-                if (trackResidual) {
+                // step test passed: also require a small nodal residual.  The pre-step residual is already in F_; the post-step
+                // one costs one extra evaluation and is taken only when the pre-step value is not conclusive (or when tracked).
+                double r = 0; for (int i = 0; i < nn_; ++i) r = std::max(r, std::fabs(F_[i]));
+                if (r > resTolA || trackResidual) {
                     evalSystem(dc, false);
-                    double r = 0; for (int i = 0; i < nn_; ++i) r = std::max(r, std::fabs(F_[i]));
-                    lastResidual = r; stats.maxResidual = std::max(stats.maxResidual, r);
+                    r = 0; for (int i = 0; i < nn_; ++i) r = std::max(r, std::fabs(F_[i]));
                 }
-                return true;
+                if (r <= resTolA) {
+                    if (trackResidual) { lastResidual = r; stats.maxResidual = std::max(stats.maxResidual, r); }
+                    return true;
+                }
             }
         }
         return false;
@@ -885,7 +917,8 @@ private:
     static constexpr int kDivs = 6;                       // step divisors 1,2,4,8,16,32
     std::vector<double> linCache_[kDivs];
     int divIdx_ = 0;
-    std::vector<double> injOld_;
+    std::vector<double> injOld_, injNew_;
+    Snapshot snap_;
     bool built_ = false, dcMode_ = false, dirty_ = false;
     SparseLU lu_;
     std::vector<double> linVals_, vals_, z_, zprev_, zprev2_, zprev3_, b_, F_, dz_, inj_, zOld_, dzOld_;

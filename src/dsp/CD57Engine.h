@@ -56,13 +56,19 @@ struct EngineParams {
     float humDb = -200.0f;               // heater/ripple hum injection, dB re 1 uA (very low = off)
     float noise = 0.0f; int noiseSeed = 1;
     bool speakerHeating = true;
+    bool otSaturation = false;           // optional lab feature: ASSUMED output-transformer saturation law (default OFF: linear core)
     // acoustic
     int outputMode = 1;                  // plugin output selector (0 provisional mic, 1 terminals, 2 user IR, 3 user IR on cone motion); unused by the engine
     float micRadial = 0.15f, micDistance = 0.10f;
 };
 
+// Largest peak voltage at the instrument jack the solver is validated for (a pickup gives well under 2 V; a hot line-level reamp
+// signal a few volts).  Beyond ~30 V the stage-1 grid network is driven so far into conduction that unrecovered solver steps appear.
+constexpr double kMaxJackVolts = 30.0;
+
 struct EngineDiag {
     uint64_t steps = 0, iterations = 0, failures = 0, substepped = 0, panics = 0;
+    uint64_t nonFiniteInputs = 0, clampedInputs = 0;   // host samples that were NaN/Inf (treated as 0) or beyond the supported jack voltage
     double maxResidual = 0.0;
     double meanIterations() const { return steps ? double(iterations) / double(steps) : 0.0; }
     float coilTempRise = 0.f, b1 = 0.f, b2 = 0.f, b3 = 0.f, cathode = 0.f;
@@ -76,6 +82,10 @@ public:
     {
         manifestError_.clear(); manifestOk_ = false;
         if (!manifestText.empty()) { manifestError_ = manifest_.load(manifestText); manifestOk_ = manifestError_.empty(); }
+        // manifest-derived circuit values are resolved ONCE here (string-keyed lookups allocate); makeConfig() on the audio thread
+        // then only copies this and applies the plugin controls
+        baseCfg_ = AmpConfig{};
+        if (manifestOk_) manifest_.apply(baseCfg_);
         sr_ = sampleRate;
         maxBlock_ = maxBlock;
         params_ = p;
@@ -131,7 +141,7 @@ public:
         const auto& s = amp_.network().stats;
         d.steps = s.steps - diagBase_.steps; d.iterations = s.iterations - diagBase_.iterations;
         d.failures = s.failures - diagBase_.failures; d.substepped = s.substepped - diagBase_.substepped;
-        d.panics = panics_; d.maxResidual = s.maxResidual; d.coilTempRise = (float)coilDeltaT_;
+        d.panics = panics_; d.nonFiniteInputs = nonFinite_; d.clampedInputs = clamped_; d.maxResidual = s.maxResidual; d.coilTempRise = (float)coilDeltaT_;
         d.b1 = (float)amp_.nodeV("b1"); d.b2 = (float)amp_.nodeV("b2"); d.b3 = (float)amp_.nodeV("b3"); d.cathode = (float)amp_.nodeV("k34");
         return d;
     }
@@ -150,7 +160,15 @@ public:
         const int F = os_.factor();
         const double kIn = (double)applied_.inputCalVolts * std::pow(10.0, (double)applied_.inputTrimDb / 20.0);
         const double kOut = std::pow(10.0, (double)applied_.outputDb / 20.0) / (double)applied_.outputRefVolts;
-        for (int i = 0; i < n; ++i) inD_[i] = (double)in[i] * kIn;
+        for (int i = 0; i < n; ++i) {
+            // boundary protection: a NaN/Inf host sample must not poison the circuit state (it would trigger an emergency
+            // re-initialisation on the audio thread), and the solver is only validated up to kMaxJackVolts at the jack
+            double x = (double)in[i];
+            if (!std::isfinite(x)) { x = 0.0; ++nonFinite_; }
+            x *= kIn;
+            if (x > kMaxJackVolts) { x = kMaxJackVolts; ++clamped_; } else if (x < -kMaxJackVolts) { x = -kMaxJackVolts; ++clamped_; }
+            inD_[i] = x;
+        }
         os_.up(inD_.data(), n, upD_.data());
         const int N = n * F;
         const double hInt = 1.0 / (sr_ * F);
@@ -190,8 +208,7 @@ public:
 private:
     AmpConfig makeConfig(const EngineParams& p) const
     {
-        AmpConfig c;
-        if (manifestOk_) manifest_.apply(c);
+        AmpConfig c = baseCfg_;
         const MarketVariant& m = marketVariants()[std::min(std::max(p.market, 0), kMarketCount - 1)];
         c.mainsHz = m.hz;
         c.lineScale = (double)p.linePercent / 100.0;
@@ -205,6 +222,7 @@ private:
         c.variationAmount = p.variation; c.variationSeed = (uint32_t)p.variationSeed;
         c.humCurrent = p.humDb > -150.0f ? 1e-6 * std::pow(10.0, (double)p.humDb / 20.0) : 0.0;
         c.noiseScale = p.noise; c.noiseSeed = (uint32_t)p.noiseSeed;
+        c.otSaturation = p.otSaturation;
         return c;
     }
     static AmpControls makeControls(const EngineParams& p)
@@ -233,7 +251,7 @@ private:
         const bool cfgChanged = n.market != o.market || n.linePercent != o.linePercent || n.v1 != o.v1 || n.v2 != o.v2 ||
             n.rectifier != o.rectifier || n.sourceMode != o.sourceMode || n.sourceR != o.sourceR || n.taper != o.taper ||
             n.variation != o.variation || n.variationSeed != o.variationSeed || n.humDb != o.humDb || n.noise != o.noise ||
-            n.noiseSeed != o.noiseSeed;
+            n.noiseSeed != o.noiseSeed || n.otSaturation != o.otSaturation;
         applied_ = n;
         amp_.setControls(makeControls(n));
         if (cfgChanged) { amp_.cfg = makeConfig(n); amp_.reconfigure(); }
@@ -265,13 +283,14 @@ private:
     double sr_ = 48000; int maxBlock_ = 0;
     std::string netlist_;
     Manifest manifest_; std::string manifestError_; bool manifestOk_ = false;
+    AmpConfig baseCfg_;
     EngineParams params_, applied_, pending_;
     bool hasPending_ = false;
     AmpCircuit amp_;
     Oversampler os_, osCone_;
     AcousticOperator acoustic_;
     std::vector<double> inD_, upD_, vt_, vc_, vtB_, vcB_;
-    uint64_t ctr_ = 0, panics_ = 0;
+    uint64_t ctr_ = 0, panics_ = 0, nonFinite_ = 0, clamped_ = 0;
     double coilDeltaT_ = 0.0, coilAcc_ = 0.0; int64_t coilCnt_ = 0, coilInterval_ = 256;
     Network::Stats diagBase_;
 };
