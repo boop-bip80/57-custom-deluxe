@@ -25,7 +25,7 @@ public:
     void mouseDown(const juce::MouseEvent&) override { if (onClick) onClick(); }
 };
 
-class PowerSwitch : public juce::Component
+class PowerSwitch : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     std::function<void(bool)> onChange;
