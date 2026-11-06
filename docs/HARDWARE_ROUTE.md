@@ -1,14 +1,17 @@
 # The route from this documented approximation to a measured match (dossier Sec. 01, 04, 24-30, 33)
 
 The dossier is explicit (pp. 1, 2, 62): public documents do **not** establish a one-to-one digital model. What it does ask for is "a circuit-informed engineering foundation and an
-explicit route to a measured match". This file is that route, step by step, with the tool that performs each step. Everything up to step 1 exists and is tested; steps 1-7 need one
-physical amplifier and a measurement chain, which is exactly the part no software can replace.
+explicit route to a measured match". This file is that route, step by step, with the tool that performs each step. The specimen-delta and comparison harnesses,
+**complex speaker-impedance fitting pipeline** and **independent per-channel volume-pot map importer** now exist; steps 1–7 still require an authenticated
+physical amplifier and a measurement chain. Synthetic test success must never be confused with comparison to Fender hardware.
 
 | Dossier question before a 1:1 claim (Sec. 33) | Today | What closes it |
 |---|---|---|
 | Which physical unit? | not applicable: no specimen | step 1 |
 | Which boundary? | **defined**: input-jack voltage -> speaker-terminal voltage *and current*; acoustic stage separate and provisional | step 6 for the acoustic boundary |
-| Are controls calibrated? | **no**: pot laws are assumed (selectable); a measured-map route exists | step 2 |
+| Are controls calibrated? | **no**: modern pot laws are assumed (selectable); a validated 11-angle measured-map importer now exists, with independent Instrument and Mic curves | step 2 |
+| Is the modern Standby behavior present? | **behavioral approximation:** independent switch interrupts simulated HV excitation but keeps tube emission warm; the actual modern circuit contact placement has not been verified | step 1: modern circuit photographs/service revision and B+ discharge measurements |
+| Do speaker-jack modes match the owner manual? | **UI representation, yes:** the original 5-choice load parameter is unchanged for automation; a **separate external-wiring selector** identifies supported single external 8 Ω and dual external 16 Ω arrangements; unsupported internal+extension remains a clearly marked experimental legacy choice; external drivers are unmeasured resistive proxies | step 6 for actual external-load impedance/acoustics |
 | Is the netlist verified? | verified against the *historical* Fig. 7 (independent re-transcription, graph-level, 14 injected faults all caught); **not** against the modern factory circuit | step 1 + 3 |
 | Are missing parameters explicit? | **yes**: every manifest entry has status, branch, source revision, serial range, interval; nothing unlabelled | - |
 | Does the model preserve memory? | **yes** (rails, capacitor charge, bias, flux, coil heat, across blocks and oversampling changes); bias/supply/coupling recovery tests pass *as model behaviour* | step 5 compares it with the amplifier |
@@ -29,12 +32,16 @@ historical netlist as a **versioned delta** (Sec. 04), not as an edit of the nom
 resistances / magnetising and leakage inductance, power-transformer secondary at a stated mains voltage, speaker Re / Le / fs / Q's). Fill in `measured` blocks (value, unit equal to the entry's, instrument,
 instrument range, lead compensation, date); leave the rest `null` - **null changes nothing**.
 
+For **Instrument and Mic volume-pot tapers**, acquire eleven independent electrical-wiper measurements at physical rotations 0, 0.1, ..., 1.0, including the endpoints; a faceplate marking is not a calibrated angle. Disconnect/isolate each pot from the surrounding network (by a qualified technician) before resistance measurements so other circuit paths do not distort the reading. Record total track resistance, grounded terminal, contact resistance, serial and instrument details. The standalone importer at `scripts/fit_pot_tapers.py` normalizes the physical resistance fractions and emits separate measured-map blocks compatible with the manifest; see [`POT_CALIBRATION.md`](POT_CALIBRATION.md). **It contains no guessed Fender modern taper values.**
+
+For the **OEM Eminence speaker's linear electrical parameters**, take a calibrated free-air *complex* impedance sweep, not a magnitude-only curve or in-cabinet sweep, and process it with `scripts/fit_speaker_impedance.py` as described in [`SPEAKER_CALIBRATION.md`](SPEAKER_CALIBRATION.md). The fitter can estimate Re, Le, fs, Qms and Qes in the model's small-signal equivalent; it cannot identify Mms, Sd, Bl(x), Kms(x), speaker compression, or the cabinet. If available, validate against a *separate repeat sweep*; the synthetic self-test and within-sweep held-out samples are not substitutes for calibration measurements.
+
 ```bash
 cd57_manifest merge data/parameters/cd57_nominal.json my_specimen_delta.json merged.json    # refuses unknown keys, unit mismatches, missing instrument/date, another base profile
 cd57_manifest check merged.json                                                                # shows each measured value BESIDE its nominal one and says whether it is inside the assumed interval
 ```
 
-The merge keeps the nominal value and its status in place, adds the measured block next to it, and labels the entry branch `specimen` (Sec. 04: "store a measured value alongside its nominal marking").
+The merge requires an identifiable specimen serial, preserves the nominal value and its status, adds the measured block next to it, and labels the entry branch `specimen` (Sec. 04: "store a measured value alongside its nominal marking").
 A measured pot map replaces the assumed taper for that pot only (Sec. 08: "the default should be a measured mapping when available"). Render with `--manifest merged.json`
 (`cd57_render`, `cd57_capture_matrix`), or embed it in a build with `-DCD57_MANIFEST=merged.json`.
 
@@ -79,9 +86,11 @@ harmonic balance; the output-transformer primary inductance and the speaker fs d
 
 ## Step 6 - the acoustic boundary (Sec. 17-19, 27 experiments 4, 5, 7)
 
-Measure the speaker's complex impedance (terminal voltage and current sweep), then voltage-to-microphone impulse responses at documented positions (radial, azimuth, distance, microphone model and orientation: Sec. 19). Load
+Measure the speaker's complex impedance (terminal voltage and current sweep, calibrated phase, small-signal excitation, **free-air if inferring free-air T/S values**), then voltage-to-microphone impulse responses at documented positions (radial, azimuth, distance, microphone model and orientation: Sec. 19). Load
 a measured IR in the plugin (route 1, applied to the terminal voltage) **or** use the hybrid route (the IR factored onto the model's own cone motion with a regularised residual so the cone is not counted twice). Do not
 apply a full IR to a model that already contains the cone (Sec. 18, 27 "duplication traps").
+
+Specifically record the OEM label/part number **PN 7708599000** and cabinet configuration before describing any capture as Fender-specific. Two external nominal 16 Ω speakers connected in parallel are *not* equivalent in frequency-dependent impedance, thermal behavior, or acoustics to two 16 Ω ideal resistors; both external modes are a safe **electrical placeholder** until those drivers are separately measured. The internal/extension combination retained for legacy software presets is explicitly **not recommended by Fender** for the physical amplifier (see the [modern manual](https://www.fmicassets.com/Damroot/Original/10001/%2757%20Custom%20Deluxe%20manual%20MULTI%207708607000a.pdf)).
 
 ## Step 7 - release evidence (Sec. 29 milestone H)
 

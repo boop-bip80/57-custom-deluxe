@@ -53,7 +53,13 @@ struct SpeakerTS {                           // ASSUMED generic 12" alnico guita
     double Cms() const { const double w0 = 2 * kPi * fs; return 1.0 / (w0 * w0 * Mms); }
 };
 
-enum class LoadMode { Speaker = 0, SpeakerPlusExt8 = 1, Dummy8 = 2, Dummy4 = 3, Dummy16 = 4 };
+// Saved presets encode these values by INDEX: never reorder the five original modes.
+// External-speaker arrangements use PROVISIONAL nominal resistive loads until
+// the actual external drivers (and cabinets) have been characterized.
+enum class LoadMode {
+    Speaker = 0, SpeakerPlusExt8 = 1, Dummy8 = 2, Dummy4 = 3, Dummy16 = 4,
+    SingleExternal8 = 5, DualExternal16 = 6
+};
 
 struct AmpConfig {
     // mains / PT (all ASSUMED, dossier Sec. 28: "Supply transformer parameters" UNKNOWN)
@@ -100,6 +106,7 @@ struct AmpControls {
     int patch = 0;                           // 0 none, 1 I1-I2, 2 M1-M2, 3 I1-M1, 4 I1-M2, 5 I2-M1, 6 I2-M2
     LoadMode load = LoadMode::Speaker;
     bool power = true;
+    bool standbyOn = true;                    // ON=play, OFF=standby; default true preserves older preset behavior
 };
 
 class AmpCircuit {
@@ -122,6 +129,10 @@ public:
         net_->build(1.0 / internalRate, theta);
         applyConfig();
         mainsGain_ = mainsTarget_ = target_.power ? 1.0 : 0.0;
+        // The modern switch's exact circuit placement has NOT been verified.
+        // Electrically gate high-voltage transformer excitation; maintain
+        // mains/heater states with POWER on during standby.
+        hvGain_ = hvTarget_ = (target_.power && target_.standbyOn) ? 1.0 : 0.0;
         emTube_ = emRect_ = target_.power ? 1.0 : 0.0;
         smoothCoef_ = 1.0 - std::exp(-1.0 / (0.020 * fsInt_ / 64.0));     // ~20 ms @ one call per 64 internal samples
         if (smoothCoef_ <= 0) smoothCoef_ = 0.2;
@@ -136,6 +147,22 @@ public:
     bool initialiseQuiescent(double warmupSeconds = 0.15)
     {
         Network& n = *net_;
+        // A host can restore a preset with POWER off or STANDBY off before
+        // preparing the plugin. Never first charge its B+ capacitors from an
+        // energized DC surrogate: the supply is physically disconnected.
+        // In this mode solve the de-energized equilibrium, preserving heater
+        // emission when POWER is on and STANDBY is selected.
+        if (hvTarget_ < 0.5) {
+            hvGain_ = 0.0;
+            std::fill(n.injVec().begin(), n.injVec().end(), 0.0);
+            n.setEmission(0, emTube_); n.setEmission(1, emTube_); n.setEmission(2, emRect_);
+            const bool ok = n.solveDC();
+            phase_ = 0.0;
+            const int steps = std::max(1, (int)(warmupSeconds * fsInt_));
+            bool settled = true;
+            for (int i = 0; i < steps; ++i) settled = tick(0.0) && settled;
+            return ok && settled;
+        }
         double vdc = dcGuessFrac * std::sqrt(2.0) * cfg.ptHalfVrms * cfg.lineScale;
         bool ok = true;
         const int b1 = n.nodeId("b1");
@@ -181,7 +208,7 @@ public:
         Network& n = *net_;
         phase_ += 2.0 * kPi * cfg.mainsHz / fsInt_;
         if (phase_ > 2.0 * kPi) phase_ -= 2.0 * kPi;
-        const double e = mainsGain_ * std::sqrt(2.0) * cfg.ptHalfVrms * cfg.lineScale * std::sin(phase_);
+        const double e = hvGain_ * std::sqrt(2.0) * cfg.ptHalfVrms * cfg.lineScale * std::sin(phase_);
         n.inj(ra_) = e / cfg.ptRs;
         n.inj(rb_) = -e / cfg.ptRs;
         double vin = eEmf;
@@ -220,7 +247,7 @@ public:
         cur_.tone += a * (target_.tone - cur_.tone);
         auto snap = [](double& c, double t) { if (std::fabs(c - t) < 1e-5) c = t; };
         snap(cur_.instVol, target_.instVol); snap(cur_.micVol, target_.micVol); snap(cur_.tone, target_.tone);
-        cur_.guitarJack = target_.guitarJack; cur_.guitarJack2 = target_.guitarJack2; cur_.patch = target_.patch; cur_.load = target_.load; cur_.power = target_.power;
+        cur_.guitarJack = target_.guitarJack; cur_.guitarJack2 = target_.guitarJack2; cur_.patch = target_.patch; cur_.load = target_.load; cur_.power = target_.power; cur_.standbyOn = target_.standbyOn;
         const double RT = cfg.potTotal;
         const double Rc = cfg.volumeMap.endpointResistance;
         auto setPot = [&](int lo, int hi, double alpha) {
@@ -261,11 +288,14 @@ public:
             case LoadMode::Dummy8: rdum = 8.0; re = OFF; break;
             case LoadMode::Dummy4: rdum = 4.0; re = OFF; break;
             case LoadMode::Dummy16: rdum = 16.0; re = OFF; break;
+            case LoadMode::SingleExternal8: rdum = 8.0; re = OFF; break;     // external at INTERNAL jack: nominal 8 ohm proxy
+            case LoadMode::DualExternal16: rdum = 16.0; rext = 16.0; re = OFF; break; // two external 16 ohm speakers in parallel
         }
         n.setR(R_re_, re); n.setR(R_dum_, rdum); n.setR(R_ext_, rext);
         rRe_ = re; rDum_ = rdum; rExt_ = rext;
         load_g_ = 1.0 / (rdum) + 1.0 / rext;
         mainsTarget_ = cur_.power ? 1.0 : 0.0;
+        hvTarget_ = (cur_.power && cur_.standbyOn) ? 1.0 : 0.0;
         n.refreshIfDirty();
     }
 
@@ -286,7 +316,7 @@ public:
     bool adoptStateFrom(const AmpCircuit& o)
     {
         if (!net_ || !o.net_ || !net_->copyStateFrom(*o.net_)) return false;
-        phase_ = o.phase_; mainsGain_ = o.mainsGain_; mainsTarget_ = o.mainsTarget_; emTube_ = o.emTube_; emRect_ = o.emRect_;
+        phase_ = o.phase_; mainsGain_ = o.mainsGain_; mainsTarget_ = o.mainsTarget_; hvGain_ = o.hvGain_; hvTarget_ = o.hvTarget_; emTube_ = o.emTube_; emRect_ = o.emRect_;
         cur_ = o.cur_;
         setVoiceCoilResistance(o.voiceCoilR_);
         applyControls(false);
@@ -295,6 +325,9 @@ public:
 
     void setSmoothing(double coefPerCall) { smoothCoef_ = coefPerCall; }
     double powerEnvelope() const { return mainsGain_; }
+    double standbyHvEnvelope() const { return hvGain_; }
+    double tubeEmissionEnvelope() const { return emTube_; }
+    double rectifierEmissionEnvelope() const { return emRect_; }
 
     double dcGuessFrac = 0.86;
     void setUseKernel(bool b) { useKernel_ = b; }          // validation: compare the generated LU kernel with the generic path
@@ -404,10 +437,15 @@ private:
 
     void updatePowerEnvelope()
     {
-        // switch contact: ~10 ms ramp ; heater emission follows with its own time constants (PROPOSED)
+        // Approximate switches: ~10 ms contact envelope.  STANDBY gates the
+        // HV excitation but does NOT extinguish heaters; rectifier and tube
+        // emission follow POWER alone.  The modern physical switch placement
+        // is unknown, so this is a behavioral model, not a confirmed wiring diagram.
         const double up = 1.0 / (0.010 * fsInt_);
         if (mainsGain_ < mainsTarget_) mainsGain_ = std::min(mainsTarget_, mainsGain_ + up);
         else if (mainsGain_ > mainsTarget_) mainsGain_ = std::max(mainsTarget_, mainsGain_ - up);
+        if (hvGain_ < hvTarget_) hvGain_ = std::min(hvTarget_, hvGain_ + up);
+        else if (hvGain_ > hvTarget_) hvGain_ = std::max(hvTarget_, hvGain_ - up);
         const double on = mainsTarget_ > 0.5 ? 1.0 : 0.0;
         const double tauTube = on ? 5.0 : 2.0, tauRect = on ? 1.5 : 1.0;
         emTube_ += (on - emTube_) * (1.0 - std::exp(-1.0 / (tauTube * fsInt_)));
@@ -422,7 +460,7 @@ private:
     bool useKernel_ = true;
     double fsInt_ = 96000, theta_ = 0.5, phase_ = 0.0;
     AmpControls target_, cur_;
-    double smoothCoef_ = 0.2, mainsGain_ = 1.0, mainsTarget_ = 1.0, emTube_ = 1.0, emRect_ = 1.0;
+    double smoothCoef_ = 0.2, mainsGain_ = 1.0, mainsTarget_ = 1.0, hvGain_ = 1.0, hvTarget_ = 1.0, emTube_ = 1.0, emRect_ = 1.0;
     double Bl_ = 1.0, voiceCoilR_ = 6.4, load_g_ = 0.0, srcG_ = 0.01, srcG2_ = 0.01, noiseDensityV_ = 0.0;
     double rRe_ = 6.4, rDum_ = 1e11, rExt_ = 1e11;     // resistances presently set on the voice-coil / dummy / extension branches
     int pu_, pu2_, sp_, sx_, sy_, ra_, rb_, k1_;

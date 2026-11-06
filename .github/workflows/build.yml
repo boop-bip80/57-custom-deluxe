@@ -1,14 +1,21 @@
 name: build
 on:
+  # Feature branch updates are tested by pull_request, avoiding duplicate matrix runs.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        # Explicit supported Intel runner while macos-latest jobs are cancelled before assignment.
+        os: [ubuntu-24.04, windows-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

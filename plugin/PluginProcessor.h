@@ -2,6 +2,7 @@
 #pragma once
 #include <atomic>
 #include <memory>
+#include <string>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
@@ -21,8 +22,10 @@ inline constexpr const char* patch = "patch";
 inline constexpr const char* plug2 = "plug2";          // second plug: none / Inst 1 / Inst 2 / Mic 1 / Mic 2
 inline constexpr const char* plug2Src = "plug2src";    // second plug source: terminated cable / right input channel
 inline constexpr const char* power = "power";
+inline constexpr const char* standbyOn = "standbyOn"; // true = HV enabled/PLAY; false = standby, heaters still powered
 inline constexpr const char* bypass = "bypass";
 inline constexpr const char* load = "load";
+inline constexpr const char* externalLoad = "externalLoad"; // separate 3-way selector; old 5-choice load automation untouched
 inline constexpr const char* outMode = "outMode";
 inline constexpr const char* micPos = "micPos";
 inline constexpr const char* micDist = "micDist";
@@ -104,6 +107,7 @@ public:
     std::atomic<int> scopePos{0};
     std::string manifestSummary() const { return manifestSummary_; }
     std::string manifestError() const { return manifestError_; }
+    std::string calibrationStatus() const { return calibrationStatus_; }
 
 private:
     class Rebuilder;
@@ -128,7 +132,7 @@ private:
     std::atomic<int> requestedOS_{1}, engineOS_{1};
     double sampleRate_ = 48000.0;
     int maxBlock_ = 512;
-    std::string netlist_, manifestText_, manifestSummary_, manifestError_;
+    std::string netlist_, manifestText_, manifestSummary_, manifestError_, calibrationStatus_;
 
     std::vector<float> monoIn_, monoIn2_, outTerm_, outAc_, irBuf_, coneBuf_;
     // Two zero-latency partitioned convolvers sharing one background queue: route 1 (terminal voltage * IR) and route 2

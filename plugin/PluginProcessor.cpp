@@ -67,7 +67,15 @@ AudioProcessorValueTreeState::ParameterLayout CD57AudioProcessor::createLayout()
     bo(pid::power, "Power", true);
     bo(pid::bypass, "Bypass", false);
     // load / output
-    ch(pid::load, "Speaker Load", {"Internal speaker 8 ohm", "Internal + extension 8 ohm", "Dummy load 8 ohm", "Dummy load 4 ohm", "Dummy load 16 ohm"}, 0);
+    // IMPORTANT: the FIVE original choices must remain FIVE in the same order. Enlarging this
+    // AudioParameterChoice would re-scale its normalised automation points in old DAW sessions.
+    // New external arrangements live in a separate, default-off parameter appended BELOW.
+    ch(pid::load, "Speaker Load", {
+        "Stock: internal 8 ohm (assumed Eminence)",
+        "Experimental: internal + ext 8 ohm (Fender does NOT recommend)",
+        "Bench: dummy 8 ohm (not a speaker)",
+        "Bench: dummy 4 ohm (not a speaker)",
+        "Bench: dummy 16 ohm (not a speaker)"}, 0);
     // saved by index: the first three entries are unchanged from earlier versions, the hybrid mode was appended
     ch(pid::outMode, "Output", {"Microphone (provisional model)", "Speaker terminals", "User IR (voltage to mic)", "User IR on cone motion (hybrid)"}, 0);
     // geometric proxies of the PROVISIONAL microphone model only (ignored by both IR modes); no measured positions exist
@@ -93,6 +101,13 @@ AudioProcessorValueTreeState::ParameterLayout CD57AudioProcessor::createLayout()
     bo(pid::heating, "Speaker Heating", true);
     bo(pid::otSat, "OT core saturation (assumed law)", false);
     ch(pid::inputCh, "Input channel", {"Mean of L + R", "Left only", "Right only"}, 0);
+    // APPEND after every existing parameter. This protects both index-based host parameter order
+    // and the old speaker-load parameter's normalised automation. True = switch ON/PLAY.
+    bo(pid::standbyOn, "Standby (ON = play)", true);
+    ch(pid::externalLoad, "External Speaker Setup", {
+        "None (use original load selection)",
+        "Single external 8 ohm (provisional load proxy)",
+        "Two external 16 ohm (provisional load proxies)"}, 0);
     return {p.begin(), p.end()};
 }
 
@@ -105,9 +120,20 @@ CD57AudioProcessor::CD57AudioProcessor()
     {   // the speaker the engine will use (manifest applied exactly as CD57Engine::makeConfig does): source of G(f) for the hybrid route
         cd57::Manifest man;
         cd57::AmpConfig cfg;
-        if (man.load(manifestText_).empty()) man.apply(cfg);
+        if (man.load(manifestText_).empty()) {
+            const std::string error = man.apply(cfg);
+            if (error.empty()) {
+                const int electricalMeasured = (int)man.isMeasured("speaker_Re") + (int)man.isMeasured("speaker_Le")
+                    + (int)man.isMeasured("speaker_fs") + (int)man.isMeasured("speaker_Qms") + (int)man.isMeasured("speaker_Qes");
+                calibrationStatus_ = "OEM speaker electrical: " + std::to_string(electricalMeasured)
+                    + "/5 specimen measurements (remaining properties assumed); Instrument taper: "
+                    + (cfg.volumeMapMeasured ? "MEASURED" : "ASSUMED") + "; Mic taper: "
+                    + (cfg.micMapMeasured ? "MEASURED" : "ASSUMED");
+            }
+        }
         speaker_ = cfg.speaker;
     }
+    if (calibrationStatus_.empty()) calibrationStatus_ = "OEM speaker and modern volume tapers: ASSUMED (no valid calibrated profile)";
     irStatus_ = "No IR loaded: the IR output modes pass the speaker terminals through unchanged";
     pBypass_ = apvts.getRawParameterValue(pid::bypass);
     pInputCh_ = apvts.getRawParameterValue(pid::inputCh);
@@ -145,7 +171,12 @@ cd57::EngineParams CD57AudioProcessor::gatherParams() const
     cd57::EngineParams e;
     e.instVol = g(pid::instVol) / 12.0f; e.micVol = g(pid::micVol) / 12.0f; e.tone = g(pid::tone) / 12.0f;
     e.jack = (int)g(pid::jack) + 1; e.jack2 = (int)g(pid::plug2); e.patch = (int)g(pid::patch); e.load = (int)g(pid::load);
+    // Separate override: legacy `load` remains a five-choice, automation-compatible parameter.
+    // 1 -> new LoadMode::SingleExternal8 (5), 2 -> new LoadMode::DualExternal16 (6).
+    const int external = (int)g(pid::externalLoad);
+    if (external > 0) e.load = 4 + external;
     e.power = g(pid::power) > 0.5f;
+    e.standbyOn = g(pid::standbyOn) > 0.5f;
     e.inputTrimDb = g(pid::inTrim); e.outputDb = g(pid::outLevel); e.inputCalVolts = g(pid::inCal);
     e.market = (int)g(pid::market); e.linePercent = g(pid::linePct);
     e.v1 = (int)g(pid::v1); e.v2 = (int)g(pid::v2); e.rectifier = (int)g(pid::rect);
@@ -442,6 +473,17 @@ void CD57AudioProcessor::setStateInformation(const void* data, int size)
         auto tree = ValueTree::fromXml(*xml);
         if (tree.isValid()) {
             const String irp = tree.getProperty("irPath").toString(), savedHash = tree.getProperty("irHash").toString();
+            // A legacy session has neither new parameter. Force the defaults even if the user
+            // loads it after engaging standby or selecting an external override in this instance.
+            auto appendMissingControl = [&](const char* id, float value) {
+                if (tree.getChildWithProperty("id", id).isValid()) return;
+                ValueTree newControl("PARAM");
+                newControl.setProperty("id", id, nullptr);
+                newControl.setProperty("value", value, nullptr);
+                tree.addChild(newControl, -1, nullptr);
+            };
+            appendMissingControl(pid::standbyOn, 1.0f);
+            appendMissingControl(pid::externalLoad, 0.0f);
             apvts.replaceState(tree);
             if (irp.isNotEmpty()) {
                 loadImpulseResponse(File(irp));

@@ -25,10 +25,12 @@ public:
     void mouseDown(const juce::MouseEvent&) override { if (onClick) onClick(); }
 };
 
-class PowerSwitch : public juce::Component
+class PowerSwitch : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     std::function<void(bool)> onChange;
+    juce::String label{"POWER"};
+    juce::String offLabel{"OFF"};
     bool on = true;
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override { on = !on; if (onChange) onChange(on); repaint(); }
@@ -59,9 +61,9 @@ private:
     juce::Image tweed_;
     KnobBox kInst_, kMic_, kTone_;
     JackComponent jacks_[4];
-    PowerSwitch powerSw_;
-    std::unique_ptr<juce::ParameterAttachment> jackAtt_, powerAtt_;
-    ComboBoxRow cPlug2_, cPlug2Src_, cPatch_, cLoad_, cOut_, cMarket_, cV1_, cV2_, cRect_, cOS_, cSource_, cTaper_, cInCh_;
+    PowerSwitch powerSw_, standbySw_;
+    std::unique_ptr<juce::ParameterAttachment> jackAtt_, powerAtt_, standbyAtt_;
+    ComboBoxRow cPlug2_, cPlug2Src_, cPatch_, cLoad_, cExternalLoad_, cOut_, cMarket_, cV1_, cV2_, cRect_, cOS_, cSource_, cTaper_, cInCh_;
     SliderRow sMicPos_, sMicDist_, sTrim_, sOutLevel_, sInCal_, sLine_, sSrcR_, sVar_, sSeed_, sHum_, sNoise_;
     juce::ToggleButton heatBtn_{"Speaker heating"}, bypassBtn_{"Bypass"}, otSatBtn_{"OT saturation (assumed)"};
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> heatAtt_, bypassAtt_, otSatAtt_;
