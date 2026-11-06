@@ -3,7 +3,8 @@
 //   * the all-null specimen template changes NOTHING (the merged manifest drives a bit-identical render)
 //   * a measured value is stored BESIDE the nominal one, used by the model, and can be switched off; entries are labelled branch 'specimen'
 //   * a delta is refused for: an unknown parameter, a unit mismatch, a missing instrument, a missing date, another base profile, an unknown branch, a wrong schema
-//   * a measured potentiometer map overrides the plugin's assumed taper for that pot only; an invalid map (not monotonic, wrong length) is a reported manifest error
+//   * a measured potentiometer map overrides the plugin's assumed taper for that pot only; invalid maps (non-monotone, wrong length, wrong end-stops) are refused
+//   * specimen deltas must identify the hardware; critical speaker parameters must be finite, positive and within broad numerical safety ranges
 //   * merging is idempotent and survives a parse/dump round trip
 #include <cmath>
 #include <cstdio>
@@ -132,19 +133,49 @@ int main()
         refused("a delta naming an unknown branch is refused", delta(measured("speaker_Re", mval(6.0, "ohm")), "provisional_public_source_nominal", "prototype"), "branch");
         refused("a delta with the wrong schema tag is refused", delta(measured("speaker_Re", mval(6.0, "ohm")), "provisional_public_source_nominal", "specimen", "cd57-delta-v0"), "schema");
         refused("a measured value that is not a number is refused", delta(measured("speaker_Re", "{\"value\": \"six\", \"unit\": \"ohm\", \"instrument\": \"x\", \"date\": \"y\"}")), "number");
+        refused("speaker Re must be positive", delta(measured("speaker_Re", mval(-6.0, "ohm"))), "finite positive scalar");
+        refused("speaker Le must not be zero", delta(measured("speaker_Le", mval(0.0, "H"))), "finite positive scalar");
+        refused("speaker fs must be within broad stability bounds", delta(measured("speaker_fs", mval(100000.0, "Hz"))), "finite positive scalar");
+        refused("speaker Qms must be positive", delta(measured("speaker_Qms", mval(-1.0, "-"))), "finite positive scalar");
+        refused("speaker Qes must be a scalar", delta(measured("speaker_Qes", "{\"value\": [1.0,2.0], \"unit\": \"-\", \"instrument\": \"impedance analyser\", \"instrument_range\": \"10 ohm\", \"lead_compensation\": \"zeroed\", \"date\": \"2026-12-01\"}")), "finite positive scalar");
+        refused("speaker moving mass cannot be negative", delta(measured("speaker_Mms", mval(-0.02, "kg"))), "finite positive scalar");
+        refused("speaker piston area cannot be zero", delta(measured("speaker_Sd", mval(0.0, "m^2"))), "finite positive scalar");
+        refused("speaker thermal capacity cannot be negative", delta(measured("speaker_thermal_Cth", mval(-8.0, "J/K"))), "finite positive scalar");
+        refused("speaker thermal resistance cannot be negative", delta(measured("speaker_thermal_Rth", mval(-6.0, "K/W"))), "finite positive scalar");
+        refused("speaker voice-coil temperature coefficient cannot be negative", delta(measured("speaker_voice_coil_tempco", mval(-0.004, "1/K"))), "finite positive scalar");
+        refused("calendar-invalid measurement date is refused", delta(measured("speaker_Re", mval(6.4, "ohm", "LCR", "2026-99-99"))), "ISO YYYY-MM-DD");
+        refused("non-leap February date is refused", delta(measured("speaker_Re", mval(6.4, "ohm", "LCR", "2025-02-29"))), "ISO YYYY-MM-DD");
+        refused("wrong date separator is refused", delta(measured("speaker_Re", mval(6.4, "ohm", "LCR", "2026/11/06"))), "ISO YYYY-MM-DD");
+        refused("speaker needs measurement range", delta(measured("speaker_Re", "{\"value\": 6.4, \"unit\": \"ohm\", \"instrument\": \"LCR\", \"date\": \"2026-11-06\", \"lead_compensation\": \"zero\"}")), "instrument_range");
+        refused("speaker needs lead compensation", delta(measured("speaker_Re", "{\"value\": 6.4, \"unit\": \"ohm\", \"instrument\": \"LCR\", \"date\": \"2026-11-06\", \"instrument_range\": \"10 ohm\"}")), "lead_compensation");
+        std::string noSerial = delta(measured("speaker_Re", mval(6.0, "ohm")));
+        const auto serialPos = noSerial.find("TEST-0001");
+        noSerial.replace(serialPos, std::string("TEST-0001").size(), "   ");
+        refused("measured parameters need a nonblank specimen serial", noSerial, "specimen.serial");
+        refused("instrument is not just whitespace", delta(measured("speaker_Re", mval(6.0, "ohm", "  "))), "instrument");
+        refused("date is not just whitespace", delta(measured("speaker_Re", mval(6.0, "ohm", "LCR", "   "))), "date");
     }
 
     std::printf("\n== 5. measured potentiometer maps (Sec. 08)\n");
     {
         const char* lin = "[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]";
         const char* strange = "[0,0.01,0.02,0.04,0.07,0.11,0.17,0.26,0.4,0.62,1.0]";
-        auto mapBody = [&](const char* arr, const char* unit = "fraction_vs_angle_11pt") { return std::string("{\"value\": ") + arr + ", \"unit\": \"" + unit + "\", \"instrument\": \"ohmmeter + protractor\", \"date\": \"2026-12-03\"}"; };
+        auto mapBody = [&](const char* arr, const char* unit = "fraction_vs_angle_11pt") { return std::string("{\"value\": ") + arr + ", \"unit\": \"" + unit + "\", \"instrument\": \"ohmmeter + protractor\", \"instrument_range\": \"0-1 Mohm\", \"lead_compensation\": \"zeroed leads\", \"date\": \"2026-12-03\"}"; };
         std::string err;
         const std::string mp = Manifest::mergeDelta(base, delta(measured("volume_pot_taper_instrument", mapBody(strange)) + "," + measured("volume_pot_taper_mic", mapBody(lin))), err);
         check(!mp.empty(), "a delta with two measured volume maps merges", err);
         Manifest m; m.load(mp); AmpConfig c; const std::string ae = m.apply(c);
         check(ae.empty() && c.volumeMapMeasured && c.micMapMeasured && !c.toneMapMeasured, "the Instrument and Mic maps are measured, the tone pot is not", ae);
         check(std::fabs(c.volumeMap.alpha(0.5) - 0.11) < 1e-12 && std::fabs(c.micVolumeMap.alpha(0.5) - 0.5) < 1e-12, "alpha(0.5) reads the measured value of each pot (0.11 and 0.5)", f(c.volumeMap.alpha(0.5), 3) + " / " + f(c.micVolumeMap.alpha(0.5), 3));
+        // Nonzero endpoint values can arise from wiper/contact resistance; allow small deviations, not arbitrary truncation of rotation.
+        const char* slightEndpoints = "[0.001,0.01,0.02,0.04,0.07,0.11,0.17,0.26,0.4,0.62,0.999]";
+        std::string validError;
+        const std::string validPartialEnds = Manifest::mergeDelta(base, delta(measured("volume_pot_taper_instrument", mapBody(slightEndpoints))), validError);
+        Manifest validEndManifest; AmpConfig validEndConfig;
+        const std::string validEndLoadError = validEndManifest.load(validPartialEnds);
+        const std::string validEndApplyError = validEndManifest.apply(validEndConfig);
+        check(!validPartialEnds.empty() && validError.empty() && validEndLoadError.empty() && validEndApplyError.empty() && validEndConfig.volumeMapMeasured,
+              "small measured end-stop residuals are permitted within the 0.03 electrical-track-fraction input tolerance", validError + validEndLoadError + validEndApplyError);
         // the plugin's assumed taper selection no longer matters for the measured pot, and the pot resistances in the circuit follow the maps separately
         EngineParams p; p.oversampleLog2 = 0; p.instVol = 0.5f; p.micVol = 0.5f; p.load = 2;
         p.taper = 0; CD57Engine ea; ea.prepare(48000.0, 512, embeddedNetlist(), p, mp);
@@ -156,16 +187,16 @@ int main()
         p.taper = 0; CD57Engine ec; ec.prepare(48000.0, 512, embeddedNetlist(), p, base);
         auto& nc = ec.amp().network();
         check(std::fabs(nc.getR(nc.resId("Rvb_lo")) - 0.15e6) < 3e3, "without a measured map the assumed audio taper is used (alpha(0.5) = 0.15)", f(nc.getR(nc.resId("Rvb_lo")), 0) + " ohm");
-        // invalid maps are reported manifest errors, and the engine falls back and says so
+        // Invalid maps are rejected on ingestion (and also checked when the map is applied).
         auto bad = [&](const char* what, const char* arr, const char* needle) {
             std::string e2; const std::string r = Manifest::mergeDelta(base, delta(measured("volume_pot_taper_instrument", mapBody(arr))), e2);
-            Manifest mm; mm.load(r); AmpConfig cc; const std::string ae2 = mm.apply(cc);
-            EngineParams q; q.oversampleLog2 = 0; CD57Engine en; en.prepare(48000.0, 512, embeddedNetlist(), q, r);
-            check(!ae2.empty() && ae2.find(needle) != std::string::npos && !en.manifestError().empty(), what, ae2);
+            check(r.empty() && e2.find(needle) != std::string::npos, what, e2);
         };
-        bad("a map that is not monotonic is a reported manifest error (a pot cannot go backwards)", "[0,0.1,0.2,0.3,0.25,0.5,0.6,0.7,0.8,0.9,1.0]", "monotonic");
-        bad("a map with 10 points is a reported manifest error", "[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,1.0]", "11");
-        bad("a map with an alpha above 1 is a reported manifest error", "[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.2]", "[0, 1]");
+        bad("a map that is not monotonic is refused (a pot cannot go backwards)", "[0,0.1,0.2,0.3,0.25,0.5,0.6,0.7,0.8,0.9,1.0]", "monotonic");
+        bad("a map with 10 points is refused", "[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,1.0]", "11");
+        bad("a map with an alpha above 1 is refused", "[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.2]", "[0, 1]");
+        bad("a map whose low end never approaches zero is refused", "[0.15,0.16,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]", "end stops");
+        bad("a map whose high end never approaches one is refused", "[0.0,0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]", "end stops");
     }
 
     std::printf("\n%d passed, %d failed\n", nPass, nFail);

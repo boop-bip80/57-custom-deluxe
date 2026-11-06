@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
@@ -141,8 +142,9 @@ void allocations()
             {"jack", [](EngineParams& q, int k) { q.jack = 1 + (k % 4); }},
             {"patch cable", [](EngineParams& q, int k) { q.patch = k % 7; }},
             {"second plug", [](EngineParams& q, int k) { q.jack2 = k % 5; }},
-            {"speaker load", [](EngineParams& q, int k) { q.load = k % 5; }},
+            {"speaker load (legacy plus external)", [](EngineParams& q, int k) { q.load = k % 7; }},
             {"power switch", [](EngineParams& q, int k) { q.power = (k % 2) == 0; }},
+            {"standby switch", [](EngineParams& q, int k) { q.standbyOn = (k % 2) == 0; }},
             {"market variant (50/60 Hz, nominal volts)", [](EngineParams& q, int k) { q.market = k % kMarketCount; }},
             {"line voltage", [](EngineParams& q, int k) { q.linePercent = 85.0f + (float)(k % 10); }},
             {"V1 / V2 tube swap", [](EngineParams& q, int k) { q.v1 = k % 2; q.v2 = k % 2; }},
@@ -245,9 +247,15 @@ void newtonAcceptance()
 void dummyLoad()
 {
     std::printf("\n== 4. Load modes: coil current, heating and terminal current\n");
+    check((int)LoadMode::Speaker == 0 && (int)LoadMode::SpeakerPlusExt8 == 1 &&
+              (int)LoadMode::Dummy8 == 2 && (int)LoadMode::Dummy4 == 3 && (int)LoadMode::Dummy16 == 4 &&
+              (int)LoadMode::SingleExternal8 == 5 && (int)LoadMode::DualExternal16 == 6,
+          "load choice indices 0..4 are preserved; two external wiring configurations appended");
     struct Mode { LoadMode m; const char* name; double R; bool coil; };
     const Mode modes[] = {{LoadMode::Speaker, "internal speaker", 0.0, true}, {LoadMode::Dummy8, "dummy 8 ohm", 8.0, false},
-                          {LoadMode::Dummy4, "dummy 4 ohm", 4.0, false}, {LoadMode::Dummy16, "dummy 16 ohm", 16.0, false}};
+                          {LoadMode::Dummy4, "dummy 4 ohm", 4.0, false}, {LoadMode::Dummy16, "dummy 16 ohm", 16.0, false},
+                          {LoadMode::SingleExternal8, "single EXTERNAL 8 ohm (unmeasured proxy)", 8.0, false},
+                          {LoadMode::DualExternal16, "two EXTERNAL 16 ohm in parallel (unmeasured proxies)", 8.0, false}};
     for (const Mode& m : modes) {
         AmpCircuit a;
         a.loadNetlist(embeddedNetlist());
@@ -269,6 +277,18 @@ void dummyLoad()
         if (m.coil) check(coilRms > 0.1, std::string(m.name) + ": the voice coil carries current", "coil current " + f(coilRms, 3) + " A rms at " + f(vpk, 1) + " V peak");
         else check(coilRms < 1e-6 && worstRel < 1e-6, std::string(m.name) + ": voice coil disconnected (no coil current, no heating) and terminal current = V / R", "coil " + f(coilRms * 1e9, 3) + " nA rms, worst |I - V/R| " + f(worstRel, 9));
     }
+    {   // The deliberately unsupported historical option retains its original impedance and speaker-branch routing.
+        AmpCircuit a; a.loadNetlist(embeddedNetlist()); a.prepare(96000.0);
+        AmpControls c; c.load = LoadMode::SpeakerPlusExt8; a.setControls(c); a.applyControls(true);
+        const Network& n = a.network();
+        check(std::fabs(n.getR(n.resId("Rext")) - 8.0) < 1e-12 &&
+                  std::fabs(n.getR(n.resId("Re")) - a.cfg.speaker.Re) < 1e-12,
+              "legacy internal + extension 8 ohm mode retains its original (Fender-not-recommended) electrical topology");
+        c.load = LoadMode::DualExternal16; a.setControls(c); a.applyControls(true);
+        check(std::fabs(n.getR(n.resId("Rdum")) - 16.0) < 1e-12 &&
+                  std::fabs(n.getR(n.resId("Rext")) - 16.0) < 1e-12 && n.getR(n.resId("Re")) > 1e10,
+              "two external 16 ohm model uses two explicit parallel branches and disconnects the internal coil");
+    }
     EngineParams p = base(); p.load = 1 + 1;                                  // dummy 8 ohm through the engine thermal state
     p.inputCalVolts = 1.0f;
     Rig r(p);
@@ -280,6 +300,67 @@ void dummyLoad()
     t0 = 0;
     for (int i = 0; i < 900; ++i) r2.run(0.1, t0);
     check(r2.e.diag().coilTempRise > 0.05f, "engine, internal speaker: the voice coil does heat", f(r2.e.diag().coilTempRise, 2) + " K");
+}
+
+// ------------------------------------------------------------------------------------------------ 4b. Modern standby: supply, not post-output mute
+void standbySwitch()
+{
+    std::printf("\n== 4b. Modern standby behavior (physical HV switch placement is unverified)\n");
+    AmpCircuit a; a.loadNetlist(embeddedNetlist()); a.prepare(96000.0);
+    AmpControls c; c.load = LoadMode::Dummy8; c.instVol = 0.7; c.tone = 0.7; c.power = true; c.standbyOn = true;
+    a.setControls(c); a.applyControls(true); a.initialiseQuiescent(0.10);
+    double activeSq = 0.0; long activeCount = 0;
+    for (int k = 0; k < 16000; ++k) {
+        if (k % 64 == 0) a.applyControls(false);
+        a.tick(0.06 * std::sin(2 * M_PI * 440.0 * k / 96000.0));
+        if (k >= 8000) { activeSq += a.vTerminal() * a.vTerminal(); ++activeCount; }
+    }
+    const double activeRms = std::sqrt(activeSq / (double)activeCount);
+    const double beforeRail = a.nodeV("b1");
+    const double beforeTube = a.tubeEmissionEnvelope();
+    check(beforeRail > 100.0 && beforeTube > 0.95 && a.standbyHvEnvelope() > 0.99,
+          "POWER+STANDBY ON: charged supply and hot valves are operating");
+    c.standbyOn = false; a.setControls(c); a.applyControls(true);
+    double lateSq = 0.0; long lateCount = 0; uint64_t failures = a.network().stats.failures;
+    for (int k = 0; k < 96000; ++k) {
+        if (k % 64 == 0) a.applyControls(false);
+        const double x = 0.06 * std::sin(2 * M_PI * 440.0 * k / 96000.0);
+        a.tick(x);
+        if (k >= 72000) { lateSq += a.vTerminal() * a.vTerminal(); ++lateCount; }
+    }
+    const double standbyRail = a.nodeV("b1"), standbyOut = std::sqrt(lateSq / (double)lateCount);
+    check(a.powerEnvelope() > 0.99 && a.standbyHvEnvelope() < 1e-6 && a.tubeEmissionEnvelope() > 0.95 &&
+          a.rectifierEmissionEnvelope() > 0.95,
+          "STANDBY OFF disables HV excitation but keeps mains, valve heaters and rectifier emission warm");
+    check(activeRms > 1.0 && std::fabs(standbyRail) < std::fabs(beforeRail) * 0.05 && standbyOut < activeRms * 0.001,
+          "STANDBY lets physical B+ reservoir discharge and silences output without a final-buffer mute",
+          "B+1 " + f(beforeRail, 1) + " -> " + f(standbyRail, 1) + " V; 440 Hz active " + f(activeRms, 3) + " vs standby " + f(standbyOut, 5) + " V rms (>= 60 dB attenuation)");
+    AmpCircuit adopted; adopted.loadNetlist(embeddedNetlist()); adopted.prepare(192000.0); adopted.setControls(c);
+    check(adopted.adoptStateFrom(a) && adopted.standbyHvEnvelope() < 1e-6 && adopted.powerEnvelope() > 0.99 &&
+          adopted.tubeEmissionEnvelope() > 0.95,
+          "standby supply and heater state persist across an oversampling-rate state transfer");
+    c.standbyOn = true; a.setControls(c); a.applyControls(true);
+    for (int k = 0; k < 12000; ++k) { if (k % 64 == 0) a.applyControls(false); a.tick(0.06 * std::sin(2 * M_PI * 440.0 * k / 96000.0)); }
+    check(a.standbyHvEnvelope() > 0.99 && a.tubeEmissionEnvelope() > 0.95 && a.nodeV("b1") > standbyRail,
+          "leaving STANDBY re-energizes the supply without restarting cold heater emission");
+    check(a.network().stats.failures == failures, "supply switching leaves solver with no additional unrecovered failures");
+    {   // Startup with a stored STANDBY/OFF state must not secretly pre-charge B+.
+        AmpCircuit initial;
+        initial.loadNetlist(embeddedNetlist());
+        AmpControls pc; pc.power = true; pc.standbyOn = false; pc.load = LoadMode::Dummy8;
+        initial.setControls(pc); initial.prepare(96000.0);
+        const bool initOk = initial.initialiseQuiescent(0.08);
+        check(initOk && initial.powerEnvelope() > 0.99 && initial.standbyHvEnvelope() < 1e-6 &&
+                  std::fabs(initial.nodeV("b1")) < 1.0 && initial.tubeEmissionEnvelope() > 0.99,
+              "pre-existing STANDBY preset initializes de-energized B+ with hot emission; no phantom charged-rail pulse",
+              "B+1 " + f(initial.nodeV("b1"), 5) + " V");
+        pc.power = false; pc.standbyOn = true;
+        AmpCircuit powerOff; powerOff.loadNetlist(embeddedNetlist()); powerOff.setControls(pc); powerOff.prepare(96000.0);
+        const bool offOk = powerOff.initialiseQuiescent(0.03);
+        check(offOk && powerOff.powerEnvelope() < 1e-6 && powerOff.standbyHvEnvelope() < 1e-6 &&
+                  std::fabs(powerOff.nodeV("b1")) < 1.0 && powerOff.tubeEmissionEnvelope() < 1e-6,
+              "pre-existing POWER OFF preset also initializes with uncharged B+ and cold emission");
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ 5. linear OT
@@ -380,13 +461,19 @@ void stateTransfer()
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     std::printf("validate_realtime: CD57Engine real-time safety and solver robustness\n");
+    if (argc == 2 && std::strcmp(argv[1], "--standby-only") == 0) {
+        standbySwitch();
+        std::printf("\nSUMMARY: %d passed, %d failed\n", nPass, nFail);
+        return nFail ? 1 : 0;
+    }
     allocations();
     badInput();
     newtonAcceptance();
     dummyLoad();
+    standbySwitch();
     outputTransformer();
     stateTransfer();
     timing();

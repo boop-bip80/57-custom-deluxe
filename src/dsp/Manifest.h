@@ -14,6 +14,7 @@
 // evidence mix and the branches for the UI and the validation report.
 #pragma once
 #include <cmath>
+#include <cctype>
 #include <map>
 #include <set>
 #include <sstream>
@@ -53,6 +54,28 @@ public:
     std::vector<ManifestEntry> entries;
     std::map<std::string, int> statusCount, branchCount;
 private:
+    static bool validIsoDate(const std::string& s)
+    {
+        if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (i == 4 || i == 7) continue;
+            if (s[i] < '0' || s[i] > '9') return false;
+        }
+        const int year = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
+        const int month = (s[5] - '0') * 10 + (s[6] - '0');
+        const int day = (s[8] - '0') * 10 + (s[9] - '0');
+        if (year == 0 || month < 1 || month > 12) return false;
+        const bool leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        const int days[] = {31, 28 + (int)leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        return day >= 1 && day <= days[month - 1];
+    }
+
+    static bool needsPhysicalCaptureProvenance(const std::string& key)
+    {
+        return key.rfind("speaker_", 0) == 0 || key == "volume_pot_taper_instrument" ||
+               key == "volume_pot_taper_mic" || key == "tone_pot_taper";
+    }
+
     mutable std::vector<std::string> read_, missing_;
 public:
 
@@ -130,12 +153,8 @@ public:
         auto* e = find(n);
         if (!e || !useMeasured || !e->hasMeasured) return false;
         read_.push_back(n);
-        if (!e->measuredIsArray || e->measuredArray.size() != 11) { err = "'" + n + "' must be an array of 11 alpha values (knob 0, 0.1, ..., 1.0)"; return false; }
-        for (size_t i = 0; i < 11; ++i) {
-            const double a = e->measuredArray[i];
-            if (!(a >= 0.0 && a <= 1.0)) { err = "'" + n + "' has an alpha outside [0, 1]"; return false; }
-            if (i && a + 1e-12 < e->measuredArray[i - 1]) { err = "'" + n + "' is not monotonic (a pot cannot go backwards)"; return false; }
-        }
+        err = validatePotAlpha(*e);
+        if (!err.empty()) return false;
         out.taper = PotTaper::Custom;
         for (size_t i = 0; i < 11; ++i) out.custom[i] = e->measuredArray[i];
         return true;
@@ -236,6 +255,16 @@ public:
             if (!hadB) { Json b; b.type = Json::String; b.str = branch; target->obj.emplace_back("branch", b); }
             ++n;
         }
+        // A measured specimen value without an identified specimen cannot be traced to hardware.
+        // The all-null template remains legal without a serial, and does not claim any measurements.
+        if (n > 0) {
+            const Json* sp = delta.get("specimen");
+            const std::string serial = sp && sp->type == Json::Object ? sp->string("serial") : "";
+            if (serial.empty() || serial.find_first_not_of(" \t\r\n") == std::string::npos) {
+                err = "a nonempty specimen.serial is mandatory when a delta contains measured parameters";
+                return "";
+            }
+        }
         // record the specimen identity and the delta that was applied (provenance of the merged manifest)
         auto setTop = [&](const char* k, const Json& v) { for (auto& f : base.obj) if (f.first == k) { f.second = v; return; } base.obj.emplace_back(k, v); };
         if (const Json* sp = delta.get("specimen")) { setTop("specimen", *sp); if (const Json* ser = sp->get("serial")) setTop("specimen_serial", *ser); }
@@ -249,6 +278,51 @@ public:
     }
 
 private:
+    // The 11 electrical alpha samples include both physical end stops. Up to 3% endpoint
+    // deviation is permitted for small wiper/contact residuals and measurement error. This
+    // is an INPUT-SANITY tolerance, not a claimed Fender manufacturing specification.
+    static std::string validatePotAlpha(const ManifestEntry& e)
+    {
+        if (!e.measuredIsArray || e.measuredArray.size() != 11) return "'" + e.name + "' must be an array of 11 alpha values (knob 0, 0.1, ..., 1.0)";
+        for (size_t i = 0; i < e.measuredArray.size(); ++i) {
+            const double a = e.measuredArray[i];
+            if (!std::isfinite(a) || !(a >= 0.0 && a <= 1.0)) return "'" + e.name + "' has an alpha outside [0, 1] or not finite";
+            if (i && a + 1e-12 < e.measuredArray[i - 1]) return "'" + e.name + "' is not monotonic (a pot cannot go backwards)";
+        }
+        constexpr double kEndStopTolerance = 0.03;
+        if (e.measuredArray.front() > kEndStopTolerance ||
+            e.measuredArray.back() < 1.0 - kEndStopTolerance)
+            return "'" + e.name + "' must approach electrical alpha 0 and 1 at end stops (within 0.03 track fraction)";
+        return "";
+    }
+
+    // These deliberately broad finite/positive bounds keep the electrical solver out of
+    // non-physical domains. They are NOT OEM tolerances or a claim that the values match
+    // the Fender/Eminence driver; all specimen values still require actual measurement.
+    static std::string validateMeasuredPhysical(const ManifestEntry& e)
+    {
+        if (e.name == "volume_pot_taper_instrument" || e.name == "volume_pot_taper_mic" || e.name == "tone_pot_taper")
+            return validatePotAlpha(e);
+        const struct { const char* key; double lo, hi; } limits[] = {
+            {"speaker_Re", 0.2, 100.0}, {"speaker_Le", 1.0e-9, 1.0},
+            {"speaker_fs", 1.0, 5000.0}, {"speaker_Qms", 0.02, 1000.0}, {"speaker_Qes", 0.02, 1000.0},
+            {"speaker_Mms", 1.0e-6, 100.0}, {"speaker_Sd", 1.0e-6, 10.0},
+            {"speaker_voice_coil_tempco", 1.0e-7, 1.0},
+            {"speaker_thermal_Cth", 1.0e-6, 1.0e6}, {"speaker_thermal_Rth", 1.0e-6, 1.0e6}
+        };
+        for (const auto& bound : limits) {
+            if (e.name != bound.key) continue;
+            if (e.measuredIsArray || !std::isfinite(e.measured) ||
+                !(e.measured >= bound.lo && e.measured <= bound.hi)) {
+                std::ostringstream reason;
+                reason << "measured '" << e.name << "' must be one finite positive scalar in ["
+                       << bound.lo << ", " << bound.hi << "] (broad solver-safety bounds, not OEM tolerances)";
+                return reason.str();
+            }
+        }
+        return "";
+    }
+
     // validate and read a "measured" block into e (value or array of numbers, unit equal to the entry's, instrument and date mandatory)
     static std::string parseMeasured(const Json& m, ManifestEntry& e)
     {
@@ -265,9 +339,20 @@ private:
         if (unit.empty()) return "'measured' lacks a unit";
         if (!e.unit.empty() && unit != e.unit) return "measured unit '" + unit + "' differs from the parameter's unit '" + e.unit + "' (no silent conversion)";
         e.instrument = m.string("instrument"); e.date = m.string("date");
-        if (e.instrument.empty()) return "'measured' lacks the instrument (Sec. 04: record the instrument range and lead compensation used)";
-        if (e.date.empty()) return "'measured' lacks a date";
+        if (e.instrument.empty() || e.instrument.find_first_not_of(" \t\r\n") == std::string::npos)
+            return "'measured' lacks the instrument (Sec. 04: record the instrument range and lead compensation used)";
+        if (e.date.empty() || e.date.find_first_not_of(" \t\r\n") == std::string::npos)
+            return "'measured' lacks a date";
+        if (!validIsoDate(e.date)) return "'measured' date must be a real ISO YYYY-MM-DD calendar date";
         e.instrumentRange = m.string("instrument_range"); e.leadCompensation = m.string("lead_compensation");
+        if (needsPhysicalCaptureProvenance(e.name)) {
+            if (e.instrumentRange.find_first_not_of(" \t\r\n") == std::string::npos)
+                return "'measured' lacks instrument_range for physical speaker/pot calibration";
+            if (e.leadCompensation.find_first_not_of(" \t\r\n") == std::string::npos)
+                return "'measured' lacks lead_compensation for physical speaker/pot calibration";
+        }
+        const std::string physicalError = validateMeasuredPhysical(e);
+        if (!physicalError.empty()) return physicalError;
         e.hasMeasured = true;
         return "";
     }

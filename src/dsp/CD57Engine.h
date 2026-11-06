@@ -38,6 +38,7 @@ struct EngineParams {
     int jack = 1, patch = 0, load = 0;
     int jack2 = 0;                       // second plug: 0 none, 1 Instrument 1, 2 Instrument 2, 3 Mic 1, 4 Mic 2 (driven by process()'s second input, or terminated)
     bool power = true;
+    bool standbyOn = true;                 // TRUE = play; FALSE = standby with heaters powered
     // plugin I/O calibration
     float inputTrimDb = 0.0f, outputDb = 0.0f;
     float inputCalVolts = 1.0f;          // peak volts at the jack for a 0 dBFS sample
@@ -282,7 +283,7 @@ private:
     {
         AmpControls c;
         c.instVol = p.instVol; c.micVol = p.micVol; c.tone = p.tone;
-        c.guitarJack = p.jack; c.guitarJack2 = p.jack2; c.patch = p.patch; c.load = (LoadMode)p.load; c.power = p.power;
+        c.guitarJack = p.jack; c.guitarJack2 = p.jack2; c.patch = p.patch; c.load = (LoadMode)p.load; c.power = p.power; c.standbyOn = p.standbyOn;
         return c;
     }
     static AcousticParams makeAcoustic(const EngineParams& p)
