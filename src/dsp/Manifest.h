@@ -51,10 +51,11 @@ public:
             if (v && v->isNumber()) { e.hasValue = true; e.value = v->num; }
             const bool isNull = !v || v->isNull();
             if (isNull && e.status != "unknown") return "parameter '" + e.name + "' has a null value but status '" + e.status + "' (only 'unknown' may be null)";
-            if (e.status == "assumed") {
+            // a sensitivity interval is read wherever one is given (historical-nominal pots, proposed thermal values, ...) and is MANDATORY for 'assumed'
+            {
                 const Json* iv = j.get("interval");
-                if (iv && iv->type == Json::Array && iv->arr.size() == 2) { e.hasInterval = true; e.lo = iv->arr[0].num; e.hi = iv->arr[1].num; }
-                else if (v && v->isNumber()) return "assumed parameter '" + e.name + "' lacks a sensitivity interval (dossier Sec. 28)";
+                if (iv && iv->type == Json::Array && iv->arr.size() == 2 && iv->arr[0].isNumber() && iv->arr[1].isNumber()) { e.hasInterval = true; e.lo = iv->arr[0].num; e.hi = iv->arr[1].num; }
+                else if (e.status == "assumed" && v && v->isNumber()) return "assumed parameter '" + e.name + "' lacks a sensitivity interval (dossier Sec. 28)";
             }
             ++statusCount[e.status];
             entries.push_back(e);
