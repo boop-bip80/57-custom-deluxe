@@ -720,7 +720,9 @@ static void sectionD(bool quick)
         const size_t i16 = std::find(Fs.begin(), Fs.end(), 16) - Fs.begin();
         info(stims[s].name + ": the 16x reference of section C carries an estimated error of " + f(err[i16], 1) + " dBFS (extrapolated); the 8x candidate's own error is " + f(err[i16 - 1], 1) + " dBFS");
         double pMin = 1e9; for (size_t k = 2; k + 2 < Fs.size(); ++k) pMin = std::min(pMin, pObs[k]);
-        check(pMin >= 1.0, stims[s].name + ": the solver converges at least first order from 4x upwards (observed p >= 1)", "observed p (4x, 8x, ...): " + [&] { std::string t; for (size_t k = 2; k + 2 < Fs.size(); ++k) t += f(pObs[k], 2) + " "; return t; }());
+        // The scheme is first order by design wherever backward Euler is used (the 6V6 interelectrode capacitances, see the netlist), so an
+        // exactly first-order run returns p = 1 up to estimator noise; the criterion is p >= 1 within a stated estimator tolerance of 0.05.
+        check(pMin >= 0.95, stims[s].name + ": the solver converges at its designed order (>= first order, estimator tolerance 0.05) from 4x upwards", "observed p (4x, 8x, ...): " + [&] { std::string t; for (size_t k = 2; k + 2 < Fs.size(); ++k) t += f(pObs[k], 3) + " "; return t; }());
     }
 
     // ---- why the mains-time convention matters for the measured order

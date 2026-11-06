@@ -235,19 +235,21 @@ void CD57Editor::setChoice(const char* id, int idx)
 
 void CD57Editor::paintTweed()
 {
-    tweed_ = Image(Image::RGB, 980, 780, false);
+    // sized from the editor itself so the texture always covers the window (the window grew when lab controls were added)
+    const int W = getWidth(), H = getHeight();
+    tweed_ = Image(Image::RGB, W, H, false);
     Graphics g(tweed_);
     g.fillAll(kTweed);
     Random rnd(57);
-    for (int i = -800; i < 980; i += 5) {                       // twill: diagonal bands
+    for (int i = -H; i < W; i += 5) {                           // twill: diagonal bands
         g.setColour(kTweedDark.withAlpha(0.35f));
-        g.drawLine((float)i, 0.0f, (float)i + 780.0f, 780.0f, 1.6f);
+        g.drawLine((float)i, 0.0f, (float)(i + H), (float)H, 1.6f);
         g.setColour(Colour(0xffe8c978).withAlpha(0.35f));
-        g.drawLine((float)i + 2.5f, 0.0f, (float)i + 782.5f, 780.0f, 1.0f);
+        g.drawLine((float)i + 2.5f, 0.0f, (float)(i + H) + 2.5f, (float)H, 1.0f);
     }
-    for (int i = 0; i < 9000; ++i) {                           // fibre noise
+    for (int i = 0; i < W * H / 85; ++i) {                     // fibre noise
         g.setColour((rnd.nextBool() ? Colours::black : Colours::white).withAlpha(0.04f));
-        g.fillRect(rnd.nextInt(980), rnd.nextInt(780), 1 + rnd.nextInt(2), 1);
+        g.fillRect(rnd.nextInt(W), rnd.nextInt(H), 1 + rnd.nextInt(2), 1);
     }
 }
 

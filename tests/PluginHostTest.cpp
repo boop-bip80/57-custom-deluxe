@@ -62,9 +62,11 @@ int main(int argc, char** argv)
         std::cout << "-- sample rate " << sr << "\n";
         inst->setPlayConfigDetails(2, 2, sr, 1024);
         inst->prepareToPlay(sr, 1024);   // host contract: no block may exceed this
-        // JUCE's VST3 host learns of a latency change through an asynchronous restart notification: let it be delivered before reading
+        // JUCE's VST3 host class keeps the latency it first read for an instance (a latency change reaches it through an asynchronous
+        // restart notification), so this hosted figure is informational; the exact per-rate value the plugin reports (79 / 45 / 13 samples at
+        // 44.1 / 48 / 96 kHz, 2x) is checked in cd57_processor_test, which reads it from the AudioProcessor directly.
         MessageManager::getInstance()->runDispatchLoopUntil(150);
-        std::cout << "  reported latency: " << inst->getLatencySamples() << " samples\n";
+        std::cout << "  hosted-instance latency (cached by JUCE's VST3 host): " << inst->getLatencySamples() << " samples\n";
         double peak = 0.0, energy = 0.0; long n = 0;
         const int blocks[] = {64, 480, 37, 1024, 512, 7, 256};
         long t = 0;
