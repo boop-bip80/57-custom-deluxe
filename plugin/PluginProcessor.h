@@ -115,6 +115,12 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     std::unique_ptr<cd57::CD57Engine> engine_, pending_;
+    // continuity across an engine swap (oversampling change): the new engine adopts the old one's circuit state and is primed with the
+    // recent input; for kFade samples the retiring engine keeps running on the same input and the outputs are cross-faded
+    static constexpr int kInHist = 512, kFade = 512;
+    std::unique_ptr<cd57::CD57Engine> fadeEngine_;
+    std::vector<float> inHist_, primeBuf_, fadeTerm_, fadeAc_, fadeW_;
+    int inHistPos_ = 0, fadePos_ = 0;
     juce::SpinLock swapLock_;
     std::unique_ptr<Rebuilder> rebuilder_;
     std::atomic<int> requestedOS_{1}, engineOS_{1};

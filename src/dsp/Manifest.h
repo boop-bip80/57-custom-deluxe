@@ -28,11 +28,14 @@ public:
     std::string target, profile, profileNote;
     std::vector<ManifestEntry> entries;
     std::map<std::string, int> statusCount;
+private:
+    mutable std::vector<std::string> read_, missing_;
+public:
 
     // returns empty string on success, otherwise a human-readable reason (never throws)
     std::string load(const std::string& jsonText)
     {
-        entries.clear(); statusCount.clear();
+        entries.clear(); statusCount.clear(); read_.clear(); missing_.clear();
         Json root;
         try { root = Json::parse(jsonText); } catch (const std::exception& e) { return std::string("manifest JSON: ") + e.what(); }
         target = root.string("target"); profile = root.string("profile"); profileNote = root.string("profile_note");
@@ -60,7 +63,25 @@ public:
     }
 
     const ManifestEntry* find(const std::string& n) const { for (auto& e : entries) if (e.name == n) return &e; return nullptr; }
-    double value(const std::string& n, double dflt) const { auto* e = find(n); return e && e->hasValue ? e->value : dflt; }
+    // Reads a numeric entry.  Every lookup is recorded: a key the model asks for that is absent (or null) is listed in missingKeys() instead of
+    // silently falling back to a hard-coded default, and the entries the model reads are listed in readKeys() (dossier Sec. 30: provenance
+    // must be machine-checkable; an entry that drives nothing must be a declared documentation entry, not an accident).
+    double value(const std::string& n, double dflt) const
+    {
+        auto* e = find(n);
+        if (e && e->hasValue) { read_.push_back(n); return e->value; }
+        missing_.push_back(n);
+        return dflt;
+    }
+    const std::vector<std::string>& readKeys() const { return read_; }
+    const std::vector<std::string>& missingKeys() const { return missing_; }
+    // entries that exist in the manifest but are not read by apply() (call apply() first)
+    std::vector<std::string> unreadEntries() const
+    {
+        std::vector<std::string> out;
+        for (auto& e : entries) { bool r = false; for (auto& k : read_) if (k == e.name) r = true; if (!r) out.push_back(e.name); }
+        return out;
+    }
 
     // apply known numeric parameters to the circuit configuration
     void apply(AmpConfig& c) const

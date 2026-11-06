@@ -183,6 +183,15 @@ int main(int argc, char** argv)
     Manifest man; const std::string merr = man.load(gManifest);
     check(merr.empty(), "manifest loads and validates (status mandatory, assumed => interval, null => unknown)", merr);
     info(man.summary());
+    {   // which manifest entries drive the model, which are documentation, and that no requested key is missing
+        AmpConfig probeCfg; man.apply(probeCfg);
+        check(man.missingKeys().empty(), "every manifest key the model reads exists with a numeric value (no silent fall-back to a hard-coded default)",
+              man.missingKeys().empty() ? std::to_string(man.readKeys().size()) + " keys read" : "missing: " + man.missingKeys().front());
+        const auto un = man.unreadEntries();
+        std::string names; for (size_t i = 0; i < un.size(); ++i) names += (i ? ", " : "") + un[i];
+        info(std::to_string(man.readKeys().size()) + " of " + std::to_string(man.entries.size()) + " manifest entries are read by the model; the other " + std::to_string(un.size()) +
+             " DOCUMENT values that live elsewhere (the netlist, generated/TubeFits.h, plugin controls) or are unknown/unmodelled: " + names);
+    }
     { Network n; n.parse(gNetlist); n.build(1.0 / 96000, 0.5);
       info("netlist '" + n.title + "' rev " + n.revision + ": " + std::to_string(n.nodeCount()) + " nodes, " + std::to_string(n.unknowns()) + " unknowns, sparse LU " + std::to_string(n.luOps()) + " multiply-subtract ops, " + std::to_string(n.luNnz()) + " nonzeros");
       if (!netlistPath.empty()) {

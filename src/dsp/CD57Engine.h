@@ -136,6 +136,18 @@ public:
         return true;
     }
 
+    // Warm the up-sampler's filter history with the most recent host-rate input (oldest sample first), without touching the circuit, so a
+    // freshly built engine that takes over a running one does not see the input fall to zero for one filter length.  Real-time safe.
+    void primeInput(const float* in, int n)
+    {
+        const double kIn = (double)applied_.inputCalVolts * std::pow(10.0, (double)applied_.inputTrimDb / 20.0);
+        for (int pos = 0; pos < n; pos += maxBlock_) {
+            const int m = std::min(maxBlock_, n - pos);
+            for (int i = 0; i < m; ++i) { const double x = (double)in[pos + i]; inD_[(size_t)i] = std::isfinite(x) ? x * kIn : 0.0; }
+            os_.up(inD_.data(), m, upD_.data());
+        }
+    }
+
     void setParams(const EngineParams& p) { pending_ = p; hasPending_ = true; }
     int latencySamples() const { return (int)std::lround(os_.latency()); }          // exact: the cascade pads its delay to a whole number of samples
     double sampleRate() const { return sr_; }

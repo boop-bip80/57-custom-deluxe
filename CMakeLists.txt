@@ -133,4 +133,12 @@ if(CD57_BUILD_PLUGIN)
     target_compile_definitions(cd57_host_test PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_MODAL_LOOPS_PERMITTED=1)
     target_link_libraries(cd57_host_test PRIVATE juce::juce_audio_processors juce::juce_audio_utils juce::juce_recommended_config_flags)
     add_dependencies(cd57_host_test CustomDeluxe57_VST3)
+
+    # processor test: drives the plugin's AudioProcessor directly (raw saved state, synchronous latency): acoustic modes, IR path,
+    # input-channel choice, state continuity across an oversampling change
+    juce_add_console_app(cd57_processor_test PRODUCT_NAME "cd57_processor_test")
+    target_sources(cd57_processor_test PRIVATE tests/ProcessorTest.cpp)
+    target_compile_definitions(cd57_processor_test PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(cd57_processor_test PRIVATE CustomDeluxe57 cd57_core juce::juce_audio_utils juce::juce_audio_formats juce::juce_recommended_config_flags)
+    add_test(NAME plugin_processor COMMAND cd57_processor_test)
 endif()

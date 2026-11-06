@@ -185,6 +185,8 @@ void CD57AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     maxBlock_ = std::max(64, std::min(samplesPerBlock, 2048));
     monoIn_.assign((size_t)maxBlock_, 0.0f); outTerm_.assign((size_t)maxBlock_, 0.0f); outAc_.assign((size_t)maxBlock_, 0.0f);
     irBuf_.assign((size_t)maxBlock_, 0.0f); coneBuf_.assign((size_t)maxBlock_, 0.0f);
+    inHist_.assign((size_t)kInHist, 0.0f); primeBuf_.assign((size_t)kInHist, 0.0f); inHistPos_ = 0;
+    fadeTerm_.assign((size_t)maxBlock_, 0.0f); fadeAc_.assign((size_t)maxBlock_, 0.0f); fadeW_.assign((size_t)maxBlock_, 1.0f); fadeEngine_.reset(); fadePos_ = 0;
     spec_ = {sampleRate, (uint32)maxBlock_, 1};
     {   // re-derive the processed IR(s) at the new rate from the raw capture, THEN prepare (JUCE: load before prepare)
         const ScopedLock l(irLock_);
@@ -209,10 +211,16 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
 
     // swap in a freshly built engine if one is ready (no allocation, no blocking)
     if (swapLock_.tryEnter()) {
-        if (pending_ && rebuilder_ && !rebuilder_->retired) {
-            if (engine_) pending_->adoptStateFrom(*engine_);      // carry rails, capacitor charge, flux and coil temperature over: no reset to quiescent
+        if (pending_ && rebuilder_ && !rebuilder_->retired && !fadeEngine_) {
+            if (engine_) {
+                // carry rails, capacitor charge, flux and coil temperature over (no reset to quiescent) and prime the new up-sampler
+                for (int k = 0; k < kInHist; ++k) primeBuf_[(size_t)k] = inHist_[(size_t)((inHistPos_ + k) % kInHist)];
+                pending_->primeInput(primeBuf_.data(), kInHist);
+                pending_->adoptStateFrom(*engine_);
+            }
             std::swap(engine_, pending_);
-            if (rebuilder_) rebuilder_->retired = std::move(pending_);
+            fadeEngine_ = std::move(pending_);                    // the retiring engine keeps running for kFade samples (cross-fade)
+            fadePos_ = 0;
             engineOS_.store(engine_->params().oversampleLog2);
             const int lat = totalLatency(engine_->latencySamples());
             diag.latency.store(lat);
@@ -252,8 +260,21 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
                 s = inputChoice == 1 ? s : (inputChoice == 2 ? r : 0.5f * (s + r));    // mean keeps a dual-mono source at its calibrated level
             }
             monoIn_[(size_t)i] = s;
+            inHist_[(size_t)inHistPos_] = s; inHistPos_ = (inHistPos_ + 1) % kInHist;
         }
         engine_->process(monoIn_.data(), outTerm_.data(), outAc_.data(), n);
+        const bool fading = fadeEngine_ != nullptr;
+        if (fading) {
+            auto fp = params; fp.oversampleLog2 = fadeEngine_->params().oversampleLog2;
+            fadeEngine_->setParams(fp);
+            fadeEngine_->process(monoIn_.data(), fadeTerm_.data(), fadeAc_.data(), n);
+            for (int i = 0; i < n; ++i) {
+                const float w = std::min(1.0f, (float)(fadePos_ + i + 1) / (float)kFade);
+                fadeW_[(size_t)i] = w;
+                outTerm_[(size_t)i] = w * outTerm_[(size_t)i] + (1.0f - w) * fadeTerm_[(size_t)i];
+                outAc_[(size_t)i] = w * outAc_[(size_t)i] + (1.0f - w) * fadeAc_[(size_t)i];
+            }
+        }
         const float* res = outAc_.data();
         if (mode == om::speakerTerminals) res = outTerm_.data();
         else if (useIR) {
@@ -270,7 +291,10 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
             // same output units as route 1 (kOut), then the residual R = H G*/(|G|^2+lambda) (AcousticFactor.h).  Same arrival-time origin.
             const double scale = engine_->outputScale() * coneInputScale_.load(std::memory_order_relaxed);
             const auto& vc = engine_->coneVelocityBlock();
-            for (int i = 0; i < n; ++i) coneBuf_[(size_t)i] = (float)(scale * vc[(size_t)i]);
+            if (fading) {
+                const auto& vo = fadeEngine_->coneVelocityBlock();
+                for (int i = 0; i < n; ++i) coneBuf_[(size_t)i] = (float)(scale * (fadeW_[(size_t)i] * vc[(size_t)i] + (1.0f - fadeW_[(size_t)i]) * vo[(size_t)i]));
+            } else for (int i = 0; i < n; ++i) coneBuf_[(size_t)i] = (float)(scale * vc[(size_t)i]);
             float* ch[1] = {coneBuf_.data()};
             AudioBuffer<float> ab(ch, 1, n);
             dsp::AudioBlock<float> blk(ab);
@@ -289,6 +313,13 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
             scopePos.store((sp + 1) % kScope, std::memory_order_relaxed);
         }
         done += n;
+        if (fading) {
+            fadePos_ += n;
+            if (fadePos_ >= kFade && swapLock_.tryEnter()) {          // hand the retired engine to the rebuild thread (it frees it off the audio thread)
+                if (rebuilder_ && !rebuilder_->retired) { rebuilder_->retired = std::move(fadeEngine_); fadePos_ = 0; }
+                swapLock_.exit();
+            }
+        }
     }
     // publish diagnostics (cheap; ~every 8th block)
     if ((++blockCounter_ & 7) == 0) {
@@ -330,8 +361,12 @@ void CD57AudioProcessor::loadImpulseResponse(const File& f)
     const ScopedLock l(irLock_);
     irPath_ = f.getFullPathName();                // remembered even if the file cannot be read now, so a saved state keeps its reference
     if (!ok) {
-        irStatus_ = "IR NOT LOADED (" + (f.existsAsFile() ? err : String("file not found")) + "): " + f.getFullPathName();
-        return;                                   // a previously loaded IR stays active
+        // A state that names an unreadable file must not silently render with whichever IR happened to be loaded before (a preset has
+        // to sound the same every time): no IR is active, the output falls back to the speaker terminals, and the status says so.
+        irRaw_.clear(); irName_.clear(); irHash_.clear(); irFileRate_ = 0.0; irFileChannels_ = 0;
+        rebuildImpulseResponsesLocked();
+        irStatus_ = "IR NOT LOADED (" + (f.existsAsFile() ? err : String("file not found")) + "): " + f.getFullPathName() + " -- no IR is active; the output falls back to the speaker terminals";
+        return;
     }
     irName_ = f.getFileName();
     irRaw_ = std::move(samples);
