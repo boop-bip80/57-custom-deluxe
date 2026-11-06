@@ -7,7 +7,9 @@
 //  4. dummy-load modes: the voice coil is disconnected, so no coil current and no heating; terminal current is I = V / R;
 //  5. the output transformer core is linear by default (dossier Sec. 12/29) and the optional saturating law is switchable
 //     without a flux discontinuity;
-//  6. per-block processing time: mean, 99th, 99.9th percentile and worst case under demanding drive with automation.
+//  6. per-block processing time: mean, 99th, 99.9th percentile and worst case under demanding drive with automation;
+//  7. changing the oversampling factor carries the circuit state over (rails, capacitor charge, flux, coil temperature) instead of
+//     resetting the amplifier to its quiescent point.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -301,6 +303,40 @@ void timing()
     info("timings come from whatever machine runs this test (shared CI runners are noisy); worst-case figures are reported, not asserted");
 }
 
+// ------------------------------------------------------------------------------------------------ 7. state transfer across a rebuild
+void stateTransfer()
+{
+    std::printf("\n== 7. Changing the oversampling factor carries the circuit state over (dossier Sec. 23: state persistence)\n");
+    EngineParams pa = base(); pa.oversampleLog2 = 1; pa.load = 0; pa.instVol = 0.7f;
+    EngineParams pb = pa; pb.oversampleLog2 = 2;
+    Rig a(pa), b(pb), c(pb);                                      // a: running 2x engine; b: new 4x engine that adopts a's state; c: new 4x engine that does not
+    long t0 = 0;
+    for (int i = 0; i < 150; ++i) a.run(0.08, t0);                  // 1.6 s of playing: rails sag, capacitors charge, the coil warms
+    gAllocs = 0; gCount = true;
+    const bool ok = b.e.adoptStateFrom(a.e);
+    gCount = false;
+    check(ok && gAllocs.load() == 0, "adoptStateFrom() succeeds and allocates nothing (it runs on the audio thread at the swap)", std::to_string(gAllocs.load()) + " allocations");
+    const int la = a.e.latencySamples(), lb = b.e.latencySamples();
+    std::vector<double> ya, yb, yc;
+    long ta = t0, tb = t0, tc = t0;
+    const int blocks = 24;
+    for (int i = 0; i < blocks; ++i) {
+        a.run(0.08, ta); b.run(0.08, tb); c.run(0.08, tc);
+        for (size_t k = 0; k < a.ot.size(); ++k) { ya.push_back(a.ot[k]); yb.push_back(b.ot[k]); yc.push_back(c.ot[k]); }
+    }
+    // compare after the resampler restart, aligning the two latencies (y_b[n + lb - la] corresponds to y_a[n])
+    const int skip = 4 * 512, d = lb - la;
+    double ea = 0, eb = 0, ec = 0;
+    for (size_t n = (size_t)skip; n + (size_t)std::max(d, 0) < ya.size(); ++n) {
+        const double r = ya[n], vb = yb[n + (size_t)std::max(d, 0)], vc = yc[n + (size_t)std::max(d, 0)];
+        ea += r * r; eb += (r - vb) * (r - vb); ec += (r - vc) * (r - vc);
+    }
+    const double nb = std::sqrt(eb / ea), nc = std::sqrt(ec / ea);
+    info("latency " + std::to_string(la) + " (2x) -> " + std::to_string(lb) + " (4x) samples; NRMSE of the continuing signal vs the engine that never changed: with state transfer " + f(nb, 4) + ", without (fresh quiescent engine) " + f(nc, 4));
+    check(nb < 0.08 && nc > 3.0 * nb, "after the swap the signal continues from the same electrical state (NRMSE < 8 %, and the old reset-to-quiescent behaviour is at least 3x worse)", "transfer " + f(100 * nb, 2) + " %, reset " + f(100 * nc, 2) + " %");
+    check(std::fabs(b.e.diag().coilTempRise - a.e.diag().coilTempRise) < 0.2f && a.e.diag().coilTempRise > 0.05f, "the voice-coil temperature is carried over too", f(b.e.diag().coilTempRise, 2) + " K vs " + f(a.e.diag().coilTempRise, 2) + " K");
+}
+
 } // namespace
 
 int main()
@@ -311,6 +347,7 @@ int main()
     newtonAcceptance();
     dummyLoad();
     outputTransformer();
+    stateTransfer();
     timing();
     std::printf("\nSUMMARY: %d passed, %d failed\n", nPass, nFail);
     return nFail ? 1 : 0;

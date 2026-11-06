@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -267,32 +268,61 @@ int main(int argc, char** argv)
     }
 
     // ============================================================================================ 5. AC cross-check
-    section("5. Independent frequency-domain solver vs transient solver (dossier Sec. 21: 'verify against an independent circuit solver')");
+    section("5. AC solver vs transient solver at the operating rates (dossier Sec. 21: 'verify against an independent circuit solver')");
     {
-        EngineParams p = baseParams(); p.load = 0; p.instVol = 0.5f; p.tone = 0.5f;
-        Rig rig(p, 96000.0);
-        {   // isolate stamping/discretisation consistency from the (real) supply-ripple modulation of the gain:
-            // scale the three reservoir/filter capacitors up so the rails are ripple-free in BOTH solvers.
-            Network& n = rig.e.amp().network();
-            for (const char* c : {"C1", "C2", "C3"}) n.setC(n.capId(c), n.cap()[n.capId(c)].Cnom * 1000.0);
-            n.refreshLinear();
-            rig.e.amp().initialiseQuiescent(0.05);
+        para("What this compares: the complex AC solution (linearised at the DC operating point) against the transient solver's small-signal steady state, at the internal rates the plugin actually runs "
+             "(48 kHz x1, x2, x4). They share the netlist and the device code, so this checks the transient discretisation and stamps, NOT the model; the model is checked by an independent implementation that shares no code "
+             "(`scripts/independent_check.py`, CTest `independent_reimplementation`). The supply capacitors are scaled x1000 so neither solver sees rail ripple (ripple modulates the gain at 2 x mains; the AC solver linearises "
+             "at one point), and the line voltage is trimmed so that the ripple-free B+1 equals the nominal MEAN B+1 of the real supply, so the comparison is made at the nominal bias point.");
+        double b1Nom = 0;
+        { EngineParams p = baseParams(); p.load = 0; p.instVol = 0.5f; p.tone = 0.5f; Rig r(p); int cnt = 0;
+          for (int i = 0; i < 9600; ++i) { r.e.amp().tick(0.0); if (i >= 4800) { b1Nom += r.e.amp().nodeV("b1"); ++cnt; } } b1Nom /= cnt; }
+        auto rippleFree = [&](int os) {
+            double pct = 100.0, b1 = 0.0; std::unique_ptr<Rig> r;
+            for (int it = 0; it < 5; ++it) {
+                EngineParams p = baseParams(); p.load = 0; p.instVol = 0.5f; p.tone = 0.5f; p.oversampleLog2 = os; p.linePercent = (float)pct;
+                r = std::make_unique<Rig>(p, 48000.0);
+                Network& n = r->e.amp().network();
+                for (const char* c : {"C1", "C2", "C3"}) n.setC(n.capId(c), n.cap()[n.capId(c)].Cnom * 1000.0);
+                n.refreshLinear(); r->e.amp().initialiseQuiescent(0.05);
+                for (int i = 0; i < 2000; ++i) r->e.amp().tick(0.0);
+                b1 = r->e.amp().nodeV("b1");
+                if (std::fabs(b1 - b1Nom) < 0.3) break;
+                pct *= b1Nom / b1;
+            }
+            return r;
+        };
+        const std::vector<double> freqs = quick ? std::vector<double>{200, 1000, 4000} : std::vector<double>{60, 100, 200, 400, 1000, 2000, 4000, 8000};
+        const std::vector<int> oss = quick ? std::vector<int>{1} : std::vector<int>{0, 1, 2};
+        std::vector<std::vector<double>> diffs; std::vector<double> acs;
+        for (int os : oss) {
+            auto rig = rippleFree(os);
+            std::vector<double> d;
+            for (double fq : freqs) {
+                const double ac = acGainDb(*rig, fq, "sp");
+                if (os == oss.front()) acs.push_back(ac);
+                const double amp = 40e-6;                                     // small signal: 40 uV peak at the jack
+                auto y = rig->run(rig->sine(fq, amp, 0.8, 0.05));
+                const Tone t = analyseTone(y, rig->sr, fq, std::max(2, (int)(fq * 0.2)));
+                d.push_back(20 * std::log10(t.rmsV * std::sqrt(2.0) / amp) - ac);
+            }
+            diffs.push_back(d);
         }
-        para("The supply capacitors are scaled x1000 for this comparison only, so neither solver sees rail ripple (ripple modulates the real amplifier's gain at 2 x mains frequency; the AC solver linearises at one instant of it).");
-        R << "| f | AC solver | transient | difference |\n|---|---|---|---|\n";
-        double worst = 0;
-        for (double fq : (quick ? std::vector<double>{200, 1000, 4000} : std::vector<double>{60, 100, 200, 400, 1000, 2000, 4000, 8000})) {
-            const double ac = acGainDb(rig, fq, "sp");
-            // small-signal transient: EMF 40 uV peak, measure steady state
-            const double amp = 40e-6;
-            auto y = rig.run(rig.sine(fq, amp, 0.8, 0.05));
-            const Tone t = analyseTone(y, rig.sr, fq, std::max(2, (int)(fq * 0.2)));
-            const double tr = 20 * std::log10(t.rmsV * std::sqrt(2.0) / amp);
-            const double d = tr - ac; worst = std::max(worst, std::fabs(d));
-            R << "| " << f(fq, 0) << " Hz | " << f(ac, 2) << " dB | " << f(tr, 2) << " dB | " << f(d, 2) << " dB |\n";
+        R << "Nominal mean B+1 of the real supply: " << f(b1Nom, 1) << " V (ripple-free runs trimmed to it).  Transient minus AC, dB:\n\n| f | AC solver |";
+        for (int os : oss) R << " transient " << (1 << os) << "x |";
+        R << "\n|---|---|"; for (size_t k = 0; k < oss.size(); ++k) R << "---|"; R << "\n";
+        for (size_t i = 0; i < freqs.size(); ++i) {
+            R << "| " << f(freqs[i], 0) << " Hz | " << f(acs[i], 2) << " dB |";
+            for (size_t k = 0; k < oss.size(); ++k) R << " " << (diffs[k][i] >= 0 ? "+" : "") << f(diffs[k][i], 2) << " |";
+            R << "\n";
         }
         R << "\n";
-        check(worst < 0.5, "transient response matches the independent AC solution within 0.5 dB (small signal, ripple-free supply)", "worst " + f(worst, 2) + " dB");
+        for (size_t k = 0; k < oss.size(); ++k) {
+            double w = 0; for (double v : diffs[k]) w = std::max(w, std::fabs(v));
+            const std::string tag = std::to_string(1 << oss[k]) + "x oversampling (internal " + f(48.0 * (1 << oss[k]), 0) + " kHz)";
+            if (oss[k] == 0) info(tag + ": worst transient-vs-AC difference " + f(w, 2) + " dB over " + f(freqs.front(), 0) + " Hz-" + f(freqs.back() / 1000.0, 0) + " kHz (reported; trapezoidal frequency warping at the lowest internal rate)");
+            else check(w < 0.5, tag + ": transient matches the AC solution within 0.5 dB at the nominal bias point (small signal, ripple-free supply)", "worst " + f(w, 2) + " dB");
+        }
     }
 
     // ============================================================================================ 6. control interactions
@@ -344,15 +374,25 @@ int main(int argc, char** argv)
               fft(a); auto mag = [&](double fr) { const int b = (int)std::round(fr * N / rig.sr); double m = 0; for (int k = b - 3; k <= b + 3; ++k) m = std::max(m, std::abs(a[k])); return m; };
               const double ref = std::max(mag(f1), mag(f2));
               info("two-tone 700 + 1100 Hz: 2nd-order difference (400 Hz) " + f(20 * std::log10(mag(400) / ref), 1) + " dBc, 3rd-order (300 / 1500 Hz) " + f(20 * std::log10(std::max(mag(300), mag(1500)) / ref), 1) + " dBc"); }
-            // burst recovery: loud burst then quiet tone; track envelope of the quiet tone
-            { Rig r2(p); std::vector<double> x; auto b = r2.sine(1000, 0.12, 0.15); x.insert(x.end(), b.begin(), b.end());
-              const size_t quietStart = x.size(); auto q = r2.sine(1000, 0.003, 1.2, 0.0005); x.insert(x.end(), q.begin(), q.end());
-              auto y = r2.run(x); const int per = (int)(r2.sr / 1000);
-              std::vector<double> env; for (size_t i = quietStart; i + per < y.size(); i += per * 5) { double e = 0; for (int k = 0; k < per; ++k) e += y[i + k] * y[i + k]; env.push_back(std::sqrt(e / per)); }
-              const double fin = env.back(); size_t t90 = 0; for (size_t i = 0; i < env.size(); ++i) if (std::fabs(env[i] - fin) < 0.1 * fin && std::fabs(env[std::min(i + 4, env.size() - 1)] - fin) < 0.1 * fin) { t90 = i; break; }
-              const double ms = t90 * per * 5 * 1000.0 / r2.sr;
-              info("after a 150 ms burst at 120 mV, the 3 mV 1 kHz tone returns to within 10% of its settled level in " + f(ms, 0) + " ms (envelope starts at " + f(env.front() / fin, 2) + "x of final)");
-              check(env.front() != fin && std::isfinite(ms) && ms < 3000, "burst/recovery memory is present and bounded (bias shift, coupling-cap charge, supply sag are state variables)"); }
+            // burst recovery: a loud burst, then a quiet 1 kHz tone.  The tone amplitude is tracked with a 1 kHz lock-in (single-bin DFT over
+            // whole cycles), so the broadband coupling-capacitor thump after the burst cannot masquerade as the tone's recovery.
+            { Rig r2(p); std::vector<double> x; auto bst = r2.sine(1000, 0.12, 0.15); x.insert(x.end(), bst.begin(), bst.end());
+              const size_t quietStart = x.size(); auto q = r2.sine(1000, 0.003, 1.5, 0.0005); x.insert(x.end(), q.begin(), q.end());
+              auto y = r2.run(x); const int per = (int)std::lround(r2.sr / 1000.0);
+              std::vector<double> amp, tms;
+              for (size_t i = quietStart; i + per <= y.size(); i += per) {
+                  double c = 0, sn = 0; for (int k = 0; k < per; ++k) { const double w = 2 * M_PI * 1000.0 * (double)k / r2.sr; c += y[i + k] * std::cos(w); sn += y[i + k] * std::sin(w); }
+                  amp.push_back(2.0 * std::sqrt(c * c + sn * sn) / per); tms.push_back((double)(i - quietStart) * 1000.0 / r2.sr);
+              }
+              double fin = 0; int nf = 0; for (size_t i = amp.size() - 100; i < amp.size(); ++i) { fin += amp[i]; ++nf; } fin /= nf;
+              double mn = 1e9, mx = 0, t10 = 0, t5 = 0;
+              for (size_t i = 0; i < amp.size(); ++i) {
+                  const double rr = amp[i] / fin; if (tms[i] >= 2.0) { mn = std::min(mn, rr); mx = std::max(mx, rr); }
+                  if (std::fabs(rr - 1.0) > 0.10) t10 = tms[i]; if (std::fabs(rr - 1.0) > 0.05) t5 = tms[i];
+              }
+              info("after a 150 ms burst at 120 mV, the 3 mV 1 kHz tone (1 kHz lock-in): gain dips to " + f(mn, 2) + "x of its settled level, peaks at " + f(mx, 2) + "x, stays within 10 % after " + f(t10, 0) + " ms and within 5 % after " + f(t5, 0) + " ms");
+              check(mn < 0.95 || mx > 1.05, "burst memory is present: the quiet tone's gain is measurably displaced after the burst (bias shift, coupling-capacitor charge, supply sag are state variables)", "dip " + f(mn, 2) + "x, peak " + f(mx, 2) + "x");
+              check(t5 < 1000.0, "burst recovery is bounded: the tone is within 5 % of its settled level within 1 s", f(t5, 0) + " ms"); }
         }
     }
 
@@ -397,31 +437,30 @@ int main(int argc, char** argv)
             auto d = r.e.diag(); steps = d.steps; fails = d.failures; subs = d.substepped;
             check(fails == 0, "no unrecovered solver failures across a 1 kHz drive sweep up to 600 mV", std::to_string(steps) + " steps, " + std::to_string(subs) + " sub-stepped (" + f(100.0 * subs / std::max<uint64_t>(1, steps), 2) + " %), " + f(d.meanIterations(), 2) + " Newton it/step");
         }
-        // sample-rate invariance
+        // sample-rate invariance of the harmonic structure (coherent analysis windows: 40 cycles = a whole number of samples at all three rates)
         if (!quick) {
             R << "\nHarmonic levels of a 1 kHz tone (input 30 mV pk) vs host sample rate (2x oversampling):\n\n| fs | THD | H2 dBc | H3 dBc | V_out rms |\n|---|---|---|---|---|\n";
-            double h3[3], thd[3]; int idx = 0;
+            double h2[3], h3[3], thd[3]; int idx = 0;
             for (double sr : {44100.0, 48000.0, 96000.0}) { Rig r(p, sr); auto y = r.run(r.sine(1000, 0.03, 0.4)); auto t = analyseTone(y, sr, 1000, 40);
-                R << "| " << f(sr, 0) << " | " << f(t.thd * 100, 2) << " % | " << f(t.h2dB, 1) << " | " << f(t.h3dB, 1) << " | " << f(t.rmsV, 3) << " V |\n"; h3[idx] = t.h3dB; thd[idx] = t.thd; ++idx; }
+                R << "| " << f(sr, 0) << " | " << f(t.thd * 100, 2) << " % | " << f(t.h2dB, 1) << " | " << f(t.h3dB, 1) << " | " << f(t.rmsV, 3) << " V |\n"; h2[idx] = t.h2dB; h3[idx] = t.h3dB; thd[idx] = t.thd; ++idx; }
             R << "\n";
-            check(std::fabs(h3[0] - h3[2]) < 1.5 && std::fabs(h3[1] - h3[2]) < 1.5, "3rd-harmonic level agrees across 44.1/48/96 kHz within 1.5 dB", f(h3[0], 1) + " / " + f(h3[1], 1) + " / " + f(h3[2], 1) + " dBc");
+            const double d2 = std::max(std::fabs(h2[0] - h2[2]), std::fabs(h2[1] - h2[2])), d3 = std::max(std::fabs(h3[0] - h3[2]), std::fabs(h3[1] - h3[2]));
+            const double dth = std::max(std::fabs(thd[0] / thd[2] - 1), std::fabs(thd[1] / thd[2] - 1));
+            check(d2 < 0.3 && d3 < 0.3 && dth < 0.03, "H2, H3 and THD agree across 44.1 / 48 / 96 kHz hosts within 0.3 dB / 0.3 dB / 3 % (coherent analysis windows)", "H2 spread " + f(d2, 2) + " dB, H3 spread " + f(d3, 2) + " dB, THD spread " + f(100 * dth, 1) + " %");
         }
-        // oversampling convergence and aliasing
+        // oversampling: in-band harmonics converge with the factor; aliasing and integration error against a 16x reference are measured by validate_numerics
         if (!quick) {
-            R << "\nAliasing: 3.1 kHz tone, 60 mV pk (heavily driven), fs = 48 kHz. 'alias' = strongest spectral line more than 80 Hz from any harmonic of 3.1 kHz.\n\n| oversampling | THD | strongest alias (dBFS, FS = 20 V pk) | latency |\n|---|---|---|---|\n";
-            double a1 = 0, a2 = 0;
+            R << "\nIn-band harmonics of a 1 kHz tone (60 mV pk) vs oversampling factor (48 kHz host), and the latency the host is told:\n\n| oversampling | THD | H2 dBc | H3 dBc | latency |\n|---|---|---|---|---|\n";
+            double h2s[4], h3s[4];
             for (int os = 0; os <= 3; ++os) {
                 EngineParams q = p; q.oversampleLog2 = os; Rig r(q);
-                auto y = r.run(r.sine(3100, 0.06, 0.5)); const int N = 16384; std::vector<cplx> a(N);
-                for (int i = 0; i < N; ++i) { const double w = 0.5 - 0.5 * std::cos(2 * M_PI * i / N); a[i] = y[y.size() - N + i] / 20.0 * w; }
-                fft(a); double worst = 0;
-                for (int k = 20; k < N / 2 - 50; ++k) { const double fr = k * r.sr / N; bool nearH = false; for (int h = 1; h <= 8; ++h) if (std::fabs(fr - 3100.0 * h) < 80.0) nearH = true; if (!nearH) worst = std::max(worst, std::abs(a[k]) * 4.0 / N); }
-                auto t = analyseTone(y, r.sr, 3100, 60);
-                R << "| " << (1 << os) << "x | " << f(t.thd * 100, 1) << " % | " << f(20 * std::log10(worst + 1e-12), 1) << " | " << r.e.latencySamples() << " smp |\n";
-                if (os == 0) a1 = 20 * std::log10(worst + 1e-12); if (os == 1) a2 = 20 * std::log10(worst + 1e-12);
+                auto y = r.run(r.sine(1000, 0.06, 0.5)); auto t = analyseTone(y, r.sr, 1000, 40);
+                R << "| " << (1 << os) << "x | " << f(t.thd * 100, 2) << " % | " << f(t.h2dB, 2) << " | " << f(t.h3dB, 2) << " | " << r.e.latencySamples() << " smp |\n";
+                h2s[os] = t.h2dB; h3s[os] = t.h3dB;
             }
             R << "\n";
-            check(a2 < a1 - 6.0, "2x oversampling lowers the strongest alias line by more than 6 dB vs 1x", f(a1, 1) + " -> " + f(a2, 1) + " dBFS");
+            check(std::fabs(h2s[1] - h2s[3]) < 0.3 && std::fabs(h3s[1] - h3s[3]) < 0.3, "in-band H2 and H3 at the default 2x agree with 8x within 0.3 dB", "H2 " + f(h2s[1] - h2s[3], 2) + " dB, H3 " + f(h3s[1] - h3s[3], 2) + " dB");
+            info("ALIASING is not measured here. The legacy 'strongest alias' figure counted a decimator-band fold and genuine mains-ripple modulation and could not fall with the oversampling factor; the dossier's method (Sec. 23: compare against a much higher-rate reference of the same model) is implemented in `validate_numerics` (CTest `numerics_validation`), which also measures the resampler ripple, rejection and latency.");
         }
     }
 

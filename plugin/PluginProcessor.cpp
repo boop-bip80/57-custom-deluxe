@@ -71,7 +71,7 @@ AudioProcessorValueTreeState::ParameterLayout CD57AudioProcessor::createLayout()
     // geometric proxies of the PROVISIONAL microphone model only (ignored by both IR modes); no measured positions exist
     fl(pid::micPos, "Mic Position (provisional model)", lin(0.0f, 1.0f, 0.001f), 0.15f);
     fl(pid::micDist, "Mic Distance (provisional model)", lin(0.0f, 1.0f, 0.001f), 0.10f);
-    fl(pid::inTrim, "Input Trim", lin(-24.0f, 24.0f, 0.1f), 0.0f, " dB");
+    fl(pid::inTrim, "Input Trim", lin(-12.0f, 12.0f, 0.1f), 0.0f, " dB");        // trim x calibration (<= 5 V) stays inside the 30 V validated at the jack
     fl(pid::outLevel, "Output Level", lin(-30.0f, 12.0f, 0.1f), 0.0f, " dB");
     // service / lab
     fl(pid::inCal, "Input Calibration (V peak @ 0 dBFS)", F(0.1f, 5.0f, 0.01f, 1.0f), 1.0f, " V");
@@ -80,7 +80,7 @@ AudioProcessorValueTreeState::ParameterLayout CD57AudioProcessor::createLayout()
     ch(pid::v1, "V1 Tube", {"12AY7 (stock)", "12AX7"}, 0);
     ch(pid::v2, "V2 Tube", {"12AX7 (stock)", "12AY7"}, 0);
     ch(pid::rect, "Rectifier", {"5Y3 (stock)", "Silicon diodes"}, 0);
-    ch(pid::oversample, "Oversampling", {"1x", "2x", "4x", "8x"}, 1);
+    ch(pid::oversample, "Oversampling", {"1x", "2x (default)", "4x", "8x (offline: not real-time)"}, 1);
     ch(pid::source, "Source Model", {"Line / DI", "Passive pickup + cable"}, 0);
     fl(pid::srcR, "Source Resistance", F(1.0f, 20000.0f, 1.0f, 500.0f), 100.0f, " ohm");
     ch(pid::taper, "Volume Taper (assumed)", {"Audio 15%", "Audio 10%", "Linear"}, 0);
@@ -89,6 +89,8 @@ AudioProcessorValueTreeState::ParameterLayout CD57AudioProcessor::createLayout()
     fl(pid::hum, "Hum (dB re 1 uA)", lin(-100.0f, 0.0f, 0.5f), -100.0f, " dB");
     fl(pid::noise, "Noise", lin(0.0f, 1.0f, 0.01f), 0.0f);
     bo(pid::heating, "Speaker Heating", true);
+    bo(pid::otSat, "OT core saturation (assumed law)", false);
+    ch(pid::inputCh, "Input channel", {"Mean of L + R", "Left only", "Right only"}, 0);
     return {p.begin(), p.end()};
 }
 
@@ -106,6 +108,7 @@ CD57AudioProcessor::CD57AudioProcessor()
     }
     irStatus_ = "No IR loaded: the IR output modes pass the speaker terminals through unchanged";
     pBypass_ = apvts.getRawParameterValue(pid::bypass);
+    pInputCh_ = apvts.getRawParameterValue(pid::inputCh);
     apvts.addParameterListener(pid::oversample, this);
     rebuilder_ = std::make_unique<Rebuilder>(*this);
 }
@@ -150,6 +153,7 @@ cd57::EngineParams CD57AudioProcessor::gatherParams() const
     e.humDb = g(pid::hum) <= -99.5f ? -200.0f : g(pid::hum);
     e.noise = g(pid::noise); e.noiseSeed = (int)g(pid::seed);
     e.speakerHeating = g(pid::heating) > 0.5f;
+    e.otSaturation = g(pid::otSat) > 0.5f;
     e.outputMode = (int)g(pid::outMode);
     e.micRadial = g(pid::micPos); e.micDistance = g(pid::micDist);
     return e;
@@ -206,6 +210,7 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
     // swap in a freshly built engine if one is ready (no allocation, no blocking)
     if (swapLock_.tryEnter()) {
         if (pending_ && rebuilder_ && !rebuilder_->retired) {
+            if (engine_) pending_->adoptStateFrom(*engine_);      // carry rails, capacitor charge, flux and coil temperature over: no reset to quiescent
             std::swap(engine_, pending_);
             if (rebuilder_) rebuilder_->retired = std::move(pending_);
             engineOS_.store(engine_->params().oversampleLog2);
@@ -234,6 +239,7 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
         if (useCone) convolutionCone_.reset();
     }
 
+    const int inputChoice = (int)pInputCh_->load();
     int done = 0;
     float peak = 0.0f;
     while (done < total) {
@@ -241,7 +247,10 @@ void CD57AudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&)
         // mono guitar signal: sum of the available input channels
         for (int i = 0; i < n; ++i) {
             float s = buffer.getReadPointer(0)[done + i];
-            if (inCh > 1) s = 0.5f * (s + buffer.getReadPointer(1)[done + i]);
+            if (inCh > 1) {
+                const float r = buffer.getReadPointer(1)[done + i];
+                s = inputChoice == 1 ? s : (inputChoice == 2 ? r : 0.5f * (s + r));    // mean keeps a dual-mono source at its calibrated level
+            }
             monoIn_[(size_t)i] = s;
         }
         engine_->process(monoIn_.data(), outTerm_.data(), outAc_.data(), n);

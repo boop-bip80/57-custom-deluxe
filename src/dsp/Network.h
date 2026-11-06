@@ -188,7 +188,7 @@ public:
         zOld_.assign(N_, 0.0); dzOld_.assign(N_, 0.0);
         injOld_ = inj_; injNew_.assign(nn_, 0.0);
         failHist.assign(N_, 0);
-        snapshot(snap_);
+        snapshot(snap_); snapshot(xfer_);
         // slot->(row,col) inverse for linear matvec
         slotRow_.assign(nnz_, -1); slotCol_.assign(nnz_, -1);
         for (int i = 0; i < N_; ++i) for (int j = 0; j < N_; ++j) { int s = lu_.slot(i, j); if (s >= 0) { slotRow_[s] = i; slotCol_[s] = j; } }
@@ -280,6 +280,20 @@ public:
         for (size_t i = 0; i < cap_.size(); ++i) { cap_[i].vprev = S.cv[i]; cap_[i].iprev = S.ci[i]; }
         for (size_t i = 0; i < ind_.size(); ++i) { ind_[i].vprev = S.lv[i]; ind_[i].iprev = S.li[i]; }
         for (int k = 0; k < 3; ++k) { xfm_.lamPrev[k] = S.lam[k]; xfm_.lamDotPrev[k] = S.lamd[k]; xfm_.i[k] = S.cur[k]; }
+    }
+
+    // Carry the running circuit state over from another Network built from the SAME netlist at a different step h (e.g. after an
+    // oversampling change).  Only rate-independent physical quantities are copied: node voltages and winding currents, capacitor
+    // and inductor voltages/currents, transformer flux linkages.  The predictor histories restart from the copied state.  Allocation-free
+    // (the transfer buffer is sized in build()); returns false, copying nothing, if the two circuits differ.
+    bool copyStateFrom(const Network& o)
+    {
+        if (N_ != o.N_ || cap_.size() != o.cap_.size() || ind_.size() != o.ind_.size() || !built_ || !o.built_) return false;
+        o.snapshot(xfer_);
+        restore(xfer_);
+        zprev_ = z_; zprev2_ = z_; zprev3_ = z_;
+        injOld_ = inj_;
+        return true;
     }
 
     // One audio-step.  Fast path: single Newton solve.  Fallback (dossier Sec. 21): retry the same interval as
@@ -918,7 +932,7 @@ private:
     std::vector<double> linCache_[kDivs];
     int divIdx_ = 0;
     std::vector<double> injOld_, injNew_;
-    Snapshot snap_;
+    Snapshot snap_, xfer_;
     bool built_ = false, dcMode_ = false, dirty_ = false;
     SparseLU lu_;
     std::vector<double> linVals_, vals_, z_, zprev_, zprev2_, zprev3_, b_, F_, dz_, inj_, zOld_, dzOld_;

@@ -138,7 +138,7 @@ void PowerSwitch::paint(Graphics& g)
 CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(p)
 {
     setLookAndFeel(&laf_);
-    setSize(980, 780);
+    setSize(980, 826);
     paintTweed();
 
     knob(kInst_, pid::instVol, "INSTRUMENT VOL");
@@ -171,7 +171,8 @@ CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(
     combo(cRect_, pid::rect, "Rectifier");
     combo(cOS_, pid::oversample, "Oversampling");
     combo(cSource_, pid::source, "Source");
-    combo(cTaper_, pid::taper, "Volume taper");
+    combo(cTaper_, pid::taper, "Volume taper (assumed)");
+    combo(cInCh_, pid::inputCh, "Input channel");
     slider(sMicPos_, pid::micPos, "Mic position (provisional model)");
     slider(sMicDist_, pid::micDist, "Mic distance (provisional model)");
     slider(sTrim_, pid::inTrim, "Input trim");
@@ -183,7 +184,8 @@ CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(
     slider(sSeed_, pid::seed, "Variation seed");
     slider(sHum_, pid::hum, "Hum");
     slider(sNoise_, pid::noise, "Noise");
-    for (auto* b : {&heatBtn_, &bypassBtn_}) addAndMakeVisible(*b);
+    for (auto* b : {&heatBtn_, &bypassBtn_, &otSatBtn_}) addAndMakeVisible(*b);
+    otSatAtt_ = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment>(proc_.apvts, pid::otSat, otSatBtn_);
     heatAtt_ = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment>(proc_.apvts, pid::heating, heatBtn_);
     bypassAtt_ = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment>(proc_.apvts, pid::bypass, bypassBtn_);
     addAndMakeVisible(irBtn_); addAndMakeVisible(aboutBtn_);
@@ -322,12 +324,14 @@ void CD57Editor::resized()
         k.s.setBounds(cx - 52, plate_.getY() + 16, 104, 124); k.l.setBounds(cx - 70, plate_.getY() + 152, 140, 16);
     };
     kb(kInst_, plate_.getX() + 330); kb(kMic_, plate_.getX() + 480); kb(kTone_, plate_.getX() + 630);
-    for (int i = 0; i < 4; ++i) jacks_[i].setBounds(plate_.getX() + 730 + (i % 2) * 100, plate_.getY() + 20 + (i / 2) * 80, 70, 66);
+    // jack block as photographed (dossier Fig. 3): two columns, MIC on the left and INST on the right, rows 1 and 2.  The engraved labels
+    // in the 283x168 px photo are not legible; the 2x2 geometry is.  jacks_[] order: INST 1, INST 2, MIC 1, MIC 2.
+    for (int i = 0; i < 4; ++i) jacks_[i].setBounds(plate_.getX() + 730 + (i < 2 ? 100 : 0), plate_.getY() + 20 + (i % 2) * 80, 70, 66);
     cPatch_.l.setBounds(plate_.getX() + 20, plate_.getY() + 142, 90, 16); cPatch_.c.setBounds(plate_.getX() + 20, plate_.getY() + 158, 130, 22);
 
     service_ = {20, 276, 420, 232};
     scopeR_ = {456, 276, getWidth() - 476, 232};
-    lab_ = {20, 520, getWidth() - 40, 246};
+    lab_ = {20, 520, getWidth() - 40, 292};
     const int cols = 4, cw = (lab_.getWidth() - 24) / cols;
     auto place = [&](Component& l, Component& c, int col, int row, bool slider) {
         const int x = lab_.getX() + 12 + col * cw, y = lab_.getY() + 26 + row * 36;
@@ -339,9 +343,11 @@ void CD57Editor::resized()
     place(sTrim_.l, sTrim_.s, 0, 2, true); place(sOutLevel_.l, sOutLevel_.s, 1, 2, true); place(sInCal_.l, sInCal_.s, 2, 2, true); place(cSource_.l, cSource_.c, 3, 2, false);
     place(cV1_.l, cV1_.c, 0, 3, false); place(cV2_.l, cV2_.c, 1, 3, false); place(cRect_.l, cRect_.c, 2, 3, false); place(sSrcR_.l, sSrcR_.s, 3, 3, true);
     place(sVar_.l, sVar_.s, 0, 4, true); place(sSeed_.l, sSeed_.s, 1, 4, true); place(sHum_.l, sHum_.s, 2, 4, true); place(sNoise_.l, sNoise_.s, 3, 4, true);
+    place(cInCh_.l, cInCh_.c, 0, 5, false);
     const int by = lab_.getY() + 26 + 5 * 36 + 4;
-    heatBtn_.setBounds(lab_.getX() + 12, by, 170, 22); bypassBtn_.setBounds(lab_.getX() + 12 + cw, by, 120, 22);
-    irBtn_.setBounds(lab_.getX() + 12 + 2 * cw, by, 130, 22); aboutBtn_.setBounds(lab_.getX() + 12 + 3 * cw, by, cw - 12, 22);
+    otSatBtn_.setBounds(lab_.getX() + 12 + cw, lab_.getY() + 26 + 5 * 36 + 8, 2 * cw - 12, 22);
+    heatBtn_.setBounds(lab_.getX() + 12, by + 40, 170, 22); bypassBtn_.setBounds(lab_.getX() + 12 + cw, by + 40, 120, 22);
+    irBtn_.setBounds(lab_.getX() + 12 + 2 * cw, by + 40, 130, 22); aboutBtn_.setBounds(lab_.getX() + 12 + 3 * cw, by + 40, cw - 12, 22);
 }
 
 void CD57Editor::timerCallback() { repaint(); }

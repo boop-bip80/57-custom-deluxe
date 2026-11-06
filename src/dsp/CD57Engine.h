@@ -123,6 +123,19 @@ public:
         }
     }
 
+    // Carry the physical state (rails, capacitor charges, transformer flux, voice-coil temperature, mains phase) over from a running
+    // engine of the same sample rate but possibly another oversampling factor, so an oversampling change does not reset the amplifier
+    // to its quiescent state.  The resampler filters and the acoustic operator restart (a glitch of about one filter latency).
+    // Real-time safe: no allocation.  Returns false (nothing transferred) if the engines are not compatible.
+    bool adoptStateFrom(const CD57Engine& o)
+    {
+        if (std::fabs(o.sr_ - sr_) > 1e-9 || !amp_.adoptStateFrom(o.amp_)) return false;
+        coilDeltaT_ = o.coilDeltaT_;
+        amp_.setVoiceCoilResistance(amp_.cfg.speaker.Re * (1.0 + amp_.cfg.speaker.alphaT * coilDeltaT_));
+        coilAcc_ = 0.0; coilCnt_ = 0;
+        return true;
+    }
+
     void setParams(const EngineParams& p) { pending_ = p; hasPending_ = true; }
     int latencySamples() const { return (int)std::lround(os_.latency()); }          // exact: the cascade pads its delay to a whole number of samples
     double sampleRate() const { return sr_; }

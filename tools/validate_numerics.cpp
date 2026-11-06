@@ -4,6 +4,9 @@
 //
 // Sections
 //   A  what the legacy "alias" figure of cd57_validate actually measured (spectral identification of the lines)
+//   B  resampler specification, measured          C  aliasing / total error against a 16x reference
+//   D  step-size convergence of the transient solver
+//   E  solver self-checks (dossier Sec. 21/31): assembled Jacobian, KCL along a transient, charge conservation, energy balance, counters
 //
 // Result vocabulary follows cd57_validate: PASS / FAIL (a stated criterion fixed in advance), INFO (a number for the record).
 // Nothing here certifies a match with a physical amplifier; it measures the numerical error of THIS model against a
@@ -763,10 +766,125 @@ static void sectionD(bool quick)
     }
 }
 
+// ================================================================================================ E. solver self-checks
+static void sectionE(bool quick)
+{
+    section("E. Solver self-checks (dossier Sec. 21: KCL residuals, DC equilibrium, capacitor charge, power flow; Sec. 31: verified Jacobian)");
+
+    // E1. the assembled analytic Jacobian against central differences, at heavy-drive states and at control extremes
+    {
+        struct Ctl { double iv, mv, tn; LoadMode ld; const char* name; };
+        const Ctl ctls[] = {{0.7, 0.0, 0.7, LoadMode::Speaker, "nominal"}, {0.0, 0.0, 0.0, LoadMode::Dummy8, "all knobs at 0"},
+                            {1.0, 1.0, 1.0, LoadMode::Speaker, "all knobs at full"}, {0.02, 1.0, 0.3, LoadMode::Dummy4, "instrument 0.02, mic full, 4 ohm"}};
+        double worstAll = 0; std::string where;
+        for (const Ctl& c : ctls) {
+            AmpCircuit a; a.loadNetlist(gNetlist); a.prepare(96000.0, 0.5);
+            AmpControls k; k.instVol = c.iv; k.micVol = c.mv; k.tone = c.tn; k.guitarJack = 1; k.load = c.ld;
+            a.setControls(k); a.applyControls(true); a.initialiseQuiescent(0.1);
+            std::vector<std::vector<double>> snaps;
+            for (int i = 0; i < 9600; ++i) {
+                if (i % 64 == 0) a.applyControls(false);
+                a.tick(0.08 * std::sin(2 * M_PI * 220.0 * i / 96000.0) * std::min(1.0, i / 1500.0));
+                if (i % 1200 == 600) snaps.push_back(a.network().state());
+            }
+            Network& n = a.network();
+            for (const auto& zt : snaps) {
+                int wr, wc; double an, nu;
+                const double w = n.checkJacobian(zt, wr, wc, an, nu);
+                if (w > worstAll) { worstAll = w; where = std::string(c.name) + ", row " + std::to_string(wr) + " col " + std::to_string(wc); }
+            }
+        }
+        check(worstAll < 1e-3, "assembled system Jacobian matches central finite differences at heavy-drive states and control extremes (4 control sets x 8 states)", "worst relative error " + f(worstAll * 1e6, 1) + " e-6 at " + where);
+    }
+
+    // E2. nodal KCL residual and honest failure counters along a heavy-drive transient (not only at DC)
+    {
+        AmpCircuit a; a.loadNetlist(gNetlist); a.prepare(96000.0, 0.5);
+        AmpControls k; k.instVol = 0.8; k.tone = 0.7; k.guitarJack = 1; k.load = LoadMode::Speaker;
+        a.setControls(k); a.applyControls(true); a.initialiseQuiescent(0.15);
+        Network& n = a.network(); n.trackResidual = true; n.stats = {};
+        const int N = (int)(96000 * (quick ? 0.3 : 0.8));
+        for (int i = 0; i < N; ++i) { if (i % 64 == 0) a.applyControls(false); a.tick(0.25 * std::sin(2 * M_PI * 330.0 * i / 96000.0) * std::min(1.0, i / 1500.0)); }
+        uint64_t hist = 0; for (uint64_t v : n.failHist) hist += v;
+        check(n.stats.maxResidual <= n.resTolA && n.stats.failures == 0, "heavy-drive transient (250 mV at the jack, speaker load): nodal KCL residual stays below the acceptance threshold at every accepted step",
+              "max residual " + f(n.stats.maxResidual * 1e6, 2) + " uA (threshold " + f(n.resTolA * 1e6, 0) + " uA), " + std::to_string(n.stats.steps) + " steps, " + std::to_string(n.stats.substepped) + " sub-stepped, " + std::to_string(n.stats.failures) + " unrecovered");
+        check(hist == n.stats.failures, "failure counters are consistent: every unrecovered step is attributed to an unknown in the failure histogram", std::to_string(hist) + " attributed / " + std::to_string(n.stats.failures) + " counted");
+    }
+
+    // E3. one-stage charge conservation and current-sign convention (dossier Sec. 07: 'verify charge conservation with a simple one-stage test')
+    {
+        const char* text =
+            "R Rs  b 0 1k\nR Rpl b p 100k\nTRIODE V1 p g k type=12AX7\nR Rk k 0 1.5k\nC Ck k 0 25u\nR Rg g 0 1Meg\nC Cin pu g 22n\nR Rpu pu 0 1Meg\n";
+        Network net; net.parse(text); const double h = 1.0 / 96000.0; net.build(h, 0.5);
+        net.inj(net.nodeId("b")) = 250.0 / 1000.0;                       // Norton supply: 250 V behind 1 kohm
+        net.solveDC();
+        const int nk = net.nodeId("k"), nb = net.nodeId("b"), np = net.nodeId("p"), npu = net.nodeId("pu");
+        const double Rk = 1500.0, Ck = 25e-6;
+        double dcMis = std::fabs((net.V(nb) - net.V(np)) / 100e3 - (net.V(nk) / Rk) + net.tri()[0].ig) / (net.V(nk) / Rk);
+        const double vk0 = net.V(nk);
+        double q = 0, iPrev = net.tri()[0].ip + net.tri()[0].ig - net.V(nk) / Rk, worst = 0, scale = 0;
+        const int Nst = 96000 / 4;
+        for (int i = 0; i < Nst; ++i) {
+            net.inj(npu) = 0.9 * std::sin(2 * M_PI * 200.0 * i / 96000.0) * std::min(1.0, i / 4000.0) / 1e6;
+            net.step();
+            const double iC = net.tri()[0].ip + net.tri()[0].ig - net.V(nk) / Rk;     // KCL at the cathode: tube current in, Rk out, the rest charges Ck
+            q += 0.5 * h * (iC + iPrev); iPrev = iC;
+            const double dq = Ck * (net.V(nk) - vk0);
+            worst = std::max(worst, std::fabs(q - dq)); scale = std::max(scale, std::fabs(dq));
+        }
+        check(dcMis < 1e-3 && worst < 2e-3 * scale, "one triode stage: the cathode KCL holds (tube current - V_k/R_k = capacitor current) and the charge delivered equals C_k dV_k over 0.25 s of heavy drive",
+              "DC mismatch " + f(dcMis, 6) + ", charge error " + f(100 * worst / scale, 4) + " % of the largest stored charge");
+    }
+
+    // E4. power-flow / energy balance over a heavy-drive burst, whole amplifier (dossier Sec. 21, 31):  E_sources = E_dissipated + dE_stored
+    {
+        AmpCircuit a; a.loadNetlist(gNetlist); a.prepare(96000.0, 0.5);
+        AmpControls k; k.instVol = 0.8; k.tone = 0.7; k.guitarJack = 1; k.load = LoadMode::Speaker;
+        a.setControls(k); a.applyControls(true); a.initialiseQuiescent(0.15);
+        Network& n = a.network(); const double h = 1.0 / 96000.0;
+        auto pin = [&]() { double P = 0; for (int i = 0; i < n.nodeCount(); ++i) P += n.inj(i) * n.V(i); return P; };
+        auto pdiss = [&]() {
+            double P = 0;
+            for (auto& r : n.res()) { const double v = n.V(r.a) - n.V(r.b); P += v * v / (r.R * r.var); }
+            for (auto& t : n.tri()) P += t.ip * (n.V(t.p) - n.V(t.k)) + t.ig * (n.V(t.g) - n.V(t.k));
+            for (auto& q : n.pen()) P += q.ip * (n.V(q.p) - n.V(q.k)) + q.is * (n.V(q.s) - n.V(q.k)) + q.ig * (n.V(q.g) - n.V(q.k));
+            for (auto& d : n.dio()) P += d.i * (n.V(d.a) - n.V(d.k));
+            { const auto& x = n.xfm(); for (int j = 0; j < 3; ++j) P += x.R[j] * x.Rvar[j] * x.i[j] * x.i[j]; }
+            return P;
+        };
+        auto stored = [&]() {
+            double E = 0;
+            for (auto& c : n.cap()) { const double v = n.V(c.a) - n.V(c.b); E += 0.5 * c.C * c.var * v * v; }
+            for (auto& l : n.ind()) E += 0.5 * l.L * l.var * l.iprev * l.iprev;
+            {
+                const auto& x = n.xfm();
+                double F = 0;
+                for (int j = 0; j < 3; ++j) { E += 0.5 * x.Ll[j] * x.i[j] * x.i[j]; F += x.N[j] * x.i[j]; }
+                E += 0.5 * (x.P0 + x.Pair) * F * F;                        // linear core (the default): energy = P F^2 / 2
+            }
+            return E;
+        };
+        const int N = (int)(96000 * (quick ? 0.25 : 0.6));
+        double Ein = 0, Ed = 0, Pi1 = 0, Pd1 = 0, E0 = 0, peakLoad = 0;
+        for (int i = 0; i < N; ++i) {
+            if (i % 64 == 0) a.applyControls(false);
+            a.tick(0.1 * std::sin(2 * M_PI * 330.0 * i / 96000.0) * std::min(1.0, i / 3000.0));
+            const double Pi = pin(), Pd = pdiss();
+            if (i == 0) { E0 = stored(); }
+            else { Ein += 0.5 * h * (Pi + Pi1); Ed += 0.5 * h * (Pd + Pd1); }
+            Pi1 = Pi; Pd1 = Pd;
+            peakLoad = std::max(peakLoad, std::fabs(a.vTerminal()));
+        }
+        const double dE = stored() - E0, err = Ein - Ed - dE;
+        check(std::fabs(err) < 0.01 * Ein, "whole amplifier, heavy-drive burst: energy delivered by the sources = energy dissipated (resistors, valves, rectifier, winding loss) + change in stored energy (capacitors, inductors, transformer flux)",
+              "sources " + f(Ein, 3) + " J, dissipated " + f(Ed, 3) + " J, stored change " + f(dE, 4) + " J, imbalance " + f(100 * err / Ein, 3) + " % of the source energy (peak speaker voltage " + f(peakLoad, 1) + " V)");
+    }
+}
+
 // ================================================================================================ main
 int main(int argc, char** argv)
 {
-    bool quick = false; std::string reportPath, only = "ABCDEFG";
+    bool quick = false; std::string reportPath, only = "ABCDE";
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--quick") quick = true;
@@ -785,6 +903,7 @@ int main(int argc, char** argv)
     if (want('B')) sectionB();
     if (want('C')) sectionC(quick);
     if (want('D')) sectionD(quick);
+    if (want('E')) sectionE(quick);
 
     const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     R << "\n---\n**Summary: " << nPass << " passed, " << nFail << " failed** (" << f(secs, 1) << " s)\n";

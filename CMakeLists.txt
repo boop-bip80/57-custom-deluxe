@@ -57,6 +57,18 @@ if(CD57_BUILD_TOOLS)
         add_test(NAME netlist_register_checker_selftest
                  COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_netlist_against_register.py --self-test)
     endif()
+    # --- independent re-implementation (needs python3 with numpy + scipy) ---
+    add_executable(cd57_dump_reference tools/dump_reference.cpp)
+    target_link_libraries(cd57_dump_reference PRIVATE cd57_core)
+    if(CD57_PYTHON)
+        execute_process(COMMAND ${CD57_PYTHON} -I -c "import numpy, scipy" RESULT_VARIABLE CD57_PY_SCI OUTPUT_QUIET ERROR_QUIET)
+        if(CD57_PY_SCI EQUAL 0)
+            add_test(NAME independent_reimplementation
+                     COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/independent_check.py --cpp-ref-exe $<TARGET_FILE:cd57_dump_reference>)
+        else()
+            message(STATUS "independent_reimplementation test skipped: ${CD57_PYTHON} lacks numpy/scipy (pip install numpy scipy)")
+        endif()
+    endif()
     # --- supply tests ---
     add_executable(validate_supply tools/validate_supply.cpp)
     target_include_directories(validate_supply PRIVATE tools)

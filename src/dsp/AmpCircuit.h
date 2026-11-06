@@ -259,6 +259,19 @@ public:
         if (cur_.load == LoadMode::Speaker || cur_.load == LoadMode::SpeakerPlusExt8) { net_->setR(R_re_, Re); rRe_ = Re; net_->refreshLinear(); }
     }
 
+    // Take over the running state of another circuit built from the same netlist (possibly at another internal rate): circuit state,
+    // mains phase, power-switch / heater-emission envelopes, smoothed control positions and the voice-coil resistance.  The next
+    // applyControls() call moves the pots from the carried positions toward this circuit's targets.
+    bool adoptStateFrom(const AmpCircuit& o)
+    {
+        if (!net_ || !o.net_ || !net_->copyStateFrom(*o.net_)) return false;
+        phase_ = o.phase_; mainsGain_ = o.mainsGain_; mainsTarget_ = o.mainsTarget_; emTube_ = o.emTube_; emRect_ = o.emRect_;
+        cur_ = o.cur_;
+        setVoiceCoilResistance(o.voiceCoilR_);
+        applyControls(false);
+        return true;
+    }
+
     void setSmoothing(double coefPerCall) { smoothCoef_ = coefPerCall; }
     double powerEnvelope() const { return mainsGain_; }
 

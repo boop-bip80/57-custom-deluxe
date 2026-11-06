@@ -41,6 +41,8 @@ inline constexpr const char* seed = "seed";
 inline constexpr const char* hum = "hum";
 inline constexpr const char* noise = "noise";
 inline constexpr const char* heating = "heating";
+inline constexpr const char* otSat = "otSat";
+inline constexpr const char* inputCh = "inputCh";
 } // namespace id
 // values of the "outMode" choice parameter (saved in presets by index: keep the order, only ever append)
 namespace outmode {
@@ -143,6 +145,7 @@ private:
     int lastMode_ = -1;
     int blockCounter_ = 0;
     std::atomic<float>* pBypass_ = nullptr;
+    std::atomic<float>* pInputCh_ = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CD57AudioProcessor)
 };
