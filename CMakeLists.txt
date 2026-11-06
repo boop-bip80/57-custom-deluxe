@@ -31,6 +31,8 @@ target_include_directories(cd57_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp 
 target_compile_features(cd57_core PUBLIC cxx_std_17)
 set_target_properties(cd57_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
+    # MSVC declares M_PI only with _USE_MATH_DEFINES; the DSP headers and the plugin use it (this was the whole Windows build failure on main)
+    target_compile_definitions(cd57_core PUBLIC _USE_MATH_DEFINES)
     target_compile_options(cd57_core PUBLIC /fp:precise /EHsc)
 else()
     target_compile_options(cd57_core PUBLIC -fno-math-errno)
