@@ -49,6 +49,13 @@ The dossier cites sources it does not reproduce (S02 manual, S04 service drawing
 | Output transformer ratio 8 kΩ : 8 Ω | transformer | dossier text (S10), an aftermarket part; identity with the OEM part unproven |
 | V2A→V2B coupling capacitor 0.022 µF | cathodyne coupling | dossier §14 value; the drawing prints .02 (one-token alternative documented) |
 
+## Numerical evaluation (not parameters)
+
+The realtime transient solver evaluates the device laws through cubic-Hermite tables of their transcendental factors (`src/dsp/HermiteTable.h`, `Devices.h` `evalTriodeFast` /
+`evalPentodeFast`). Table ranges and knot spacings (`u` in [-20, 40] step 1/16, `v` in [4, 640] V step 0.5 V, grid `u` in [-14, 40] step 1/16) are **numerical choices**, not
+amplifier data, and introduce no new physical number: every parameter keeps its evidence label from `data/tubes/fitted_models.json` / `generated/TubeFits.h`. Agreement with the
+closed forms (<= 2e-7 relative in currents, <= 7e-6 in derivatives) is checked by `validate_tubes`.
+
 ## Manifest consumption
 
 `cd57_validate` §1 prints which manifest entries the model reads and fails if a requested key is missing, so a typo can no longer fall back silently to a hard-coded default. The model now reads 20 entries: the power-transformer
