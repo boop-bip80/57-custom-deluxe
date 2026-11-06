@@ -68,9 +68,17 @@ if(CD57_BUILD_TOOLS)
         if(CD57_PY_SCI EQUAL 0)
             add_test(NAME independent_reimplementation
                      COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/independent_check.py --cpp-ref-exe $<TARGET_FILE:cd57_dump_reference>)
+            # Synthetic fits and refusal tests only: never interpreted as measured OEM-speaker accuracy.
+            # These scripts import their adjacent fitting module, so do not use Python's -I flag.
+            add_test(NAME speaker_impedance_fit_selftest
+                     COMMAND ${CD57_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_fit_speaker_impedance.py)
         else()
-            message(STATUS "independent_reimplementation test skipped: ${CD57_PYTHON} lacks numpy/scipy (pip install numpy scipy)")
+            message(STATUS "independent_reimplementation and speaker fit tests skipped: ${CD57_PYTHON} lacks numpy/scipy (pip install numpy scipy)")
         endif()
+        # The pot importer uses only Python's standard library. Its input is synthetic
+        # or directly measured; CI does not substitute assumed modern Fender tapers.
+        add_test(NAME pot_taper_fit_selftest
+                 COMMAND ${CD57_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_fit_pot_tapers.py)
     endif()
     # --- supply tests ---
     add_executable(validate_supply tools/validate_supply.cpp)

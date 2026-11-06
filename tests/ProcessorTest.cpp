@@ -30,6 +30,52 @@ int main()
     CHECK(inst != nullptr && inst->getParameters().size() >= 27, "processor created directly, parameters exposed: " + String(inst ? inst->getParameters().size() : 0));
     if (!inst) return 1;
 
+    std::cout << "-- modern Standby parameter and Fender speaker-load choices (legacy preset indices preserved)\n";
+    {
+        auto* standby = findParam(*inst, "Standby (ON = play)");
+        auto* loads = findParam(*inst, "Speaker Load");
+        auto* external = findParam(*inst, "External Speaker Setup");
+        CHECK(standby != nullptr && standby->getNumSteps() == 2 && standby->getDefaultValue() > 0.9f && standby->getValue() > 0.9f,
+              "separate automatable Standby defaults to PLAY/ON for pre-standby sessions");
+        CHECK(loads != nullptr && loads->getNumSteps() == 5, "original load stays FIVE choices: no change to host-normalised automation mapping");
+        CHECK(external != nullptr && external->getNumSteps() == 3 && external->getDefaultValue() < 0.1f,
+              "new independent external-speaker setup defaults to NONE and can override without changing original load");
+        if (loads && loads->getNumSteps() == 5) {
+            CHECK(loads->getText(0.0f, 200).containsIgnoreCase("internal") && loads->getText(0.25f, 200).containsIgnoreCase("NOT recommend")
+                      && loads->getText(0.5f, 200).containsIgnoreCase("dummy 8") && loads->getText(1.0f, 200).containsIgnoreCase("dummy 16"),
+                  "original normalised index mapping 0, .25, .5, .75, 1 stays fixed, unsafe pairing is explicitly labeled");
+        }
+        if (external && external->getNumSteps() == 3) {
+            CHECK(external->getText(0.5f, 200).containsIgnoreCase("Single external 8") && external->getText(1.0f, 200).containsIgnoreCase("Two external 16"),
+                  "external choices support Fender wiring but clearly identify provisional modeled loads");
+        }
+        if (standby) {
+            MemoryBlock original; inst->getStateInformation(original);
+            standby->setValueNotifyingHost(0.0f);
+            if (external) external->setValueNotifyingHost(1.0f); // external override choice 2, while old mode remains untouched
+            MemoryBlock savedStandby; inst->getStateInformation(savedStandby);
+            standby->setValueNotifyingHost(1.0f);
+            if (external) external->setValueNotifyingHost(0.0f);
+            inst->setStateInformation(savedStandby.getData(), (int)savedStandby.getSize());
+            CHECK(standby->getValue() < 0.1f, "STANDBY position round-trips through host state");
+            if (external) CHECK(external->getValue() > 0.9f, "external-speaker override choice round-trips through host state");
+            // Emulate a legacy preset, in which NEITHER appended parameter existed.
+            auto legacyXml = AudioProcessor::getXmlFromBinary(savedStandby.getData(), (int)savedStandby.getSize());
+            if (legacyXml) {
+                for (auto id : {String("standbyOn"), String("externalLoad")}) {
+                    XmlElement* node = nullptr;
+                    for (auto* c : legacyXml->getChildIterator()) if (c->getStringAttribute("id") == id) node = c;
+                    if (node) legacyXml->removeChildElement(node, true);
+                }
+                MemoryBlock legacy; AudioProcessor::copyXmlToBinary(*legacyXml, legacy);
+                inst->setStateInformation(legacy.getData(), (int)legacy.getSize());
+                CHECK(standby->getValue() > 0.9f, "legacy state lacking standby node safely defaults to PLAY even after STBY was selected");
+                if (external) CHECK(external->getValue() < 0.1f, "legacy state lacking external override safely selects NONE even after external setup");
+            } else CHECK(false, "legacy state decoded as JUCE XML");
+            inst->setStateInformation(original.getData(), (int)original.getSize());
+        }
+    }
+
     std::cout << "-- reported latency equals the engine's exact, rate-dependent value\n";
     for (double sr : {44100.0, 48000.0, 96000.0}) {
         inst->setPlayConfigDetails(2, 2, sr, 1024);

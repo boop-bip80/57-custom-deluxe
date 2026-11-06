@@ -131,14 +131,17 @@ void PowerSwitch::paint(Graphics& g)
     g.setColour(Colour(0xff1e1b18)); g.fillPath(lever, AffineTransform::translation(cx, cy));
     g.setColour(Colour(0x55ffffff)); g.drawRoundedRectangle(cx - 3.0f, cy + (on ? -21.0f : 1.0f), 6.0f, 20.0f, 2.5f, 1.0f);
     g.setColour(kInk); g.setFont(F(11.0f, true));
-    g.drawText("POWER", getLocalBounds().removeFromBottom(14), Justification::centred);
+    g.drawText(label, getLocalBounds().removeFromBottom(14), Justification::centred);
+    g.setFont(F(9.5f, true));
+    g.drawText(on ? "ON" : offLabel, getLocalBounds().removeFromTop(13), Justification::centred);
 }
 
 // ---------------------------------------------------------------------------------------------------- editor
 CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(p)
 {
     setLookAndFeel(&laf_);
-    setSize(980, 826);
+    // Room below the service controls for explicit Fender load safety / measured-vs-assumed status.
+    setSize(980, 940);
     paintTweed();
 
     knob(kInst_, pid::instVol, "INSTRUMENT VOL");
@@ -161,11 +164,21 @@ CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(
     powerSw_.onChange = [this](bool on) { powerAtt_->setValueAsCompleteGesture(on ? 1.0f : 0.0f); };
     powerAtt_ = std::make_unique<ParameterAttachment>(*proc_.apvts.getParameter(pid::power), [this](float v) { powerSw_.on = v > 0.5f; powerSw_.repaint(); });
     powerAtt_->sendInitialUpdate();
+    standbySw_.label = "STANDBY";
+    standbySw_.offLabel = "STBY";
+    standbySw_.setTooltip("ON: audible operation with POWER on. STBY: HV supply interrupted while heaters stay warm (physical switch topology provisional).");
+    addAndMakeVisible(standbySw_);
+    standbySw_.onChange = [this](bool on) { standbyAtt_->setValueAsCompleteGesture(on ? 1.0f : 0.0f); };
+    standbyAtt_ = std::make_unique<ParameterAttachment>(*proc_.apvts.getParameter(pid::standbyOn), [this](float v) { standbySw_.on = v > 0.5f; standbySw_.repaint(); });
+    standbyAtt_->sendInitialUpdate();
 
     combo(cPatch_, pid::patch, "Jumper cable");
     combo(cPlug2_, pid::plug2, "Second plug");
     combo(cPlug2Src_, pid::plug2Src, "Second plug source");
-    combo(cLoad_, pid::load, "Speaker load");
+    combo(cLoad_, pid::load, "Original/internal load");
+    cLoad_.c.setTooltip("Original 5-mode selector retained exactly for host automation compatibility. Internal + extension is NOT recommended by Fender; dummy loads are bench modes.");
+    combo(cExternalLoad_, pid::externalLoad, "External setup (override)");
+    cExternalLoad_.c.setTooltip("Default NONE uses the original load selector. Fender-supported: one external 8 ohm at INTERNAL jack, or two external 16 ohm speakers at their specified jacks. Both use provisional resistive electrical proxies, with NO external cabinet acoustics.");
     combo(cOut_, pid::outMode, "Output");
     combo(cMarket_, pid::market, "Market variant");
     combo(cV1_, pid::v1, "V1 tube");
@@ -270,7 +283,7 @@ void CD57Editor::paint(Graphics& g)
     g.setColour(Colour(0x66000000)); g.drawRoundedRectangle(plate_.toFloat().reduced(1.0f), 14.0f, 1.5f);
     // pilot jewel
     const float pil = proc_.diag.pilot.load();
-    const auto jc = Point<float>((float)plate_.getX() + 168.0f, (float)plate_.getY() + 64.0f);
+    const auto jc = Point<float>((float)plate_.getX() + 242.0f, (float)plate_.getY() + 64.0f);
     g.setColour(Colour(0xff3a0a0a).interpolatedWith(Colour(0xffff3a2a), pil)); g.fillEllipse(jc.x - 13, jc.y - 13, 26, 26);
     g.setColour(Colours::white.withAlpha(0.35f * pil + 0.1f)); g.fillEllipse(jc.x - 7, jc.y - 9, 8, 6);
     if (pil > 0.05f) { g.setGradientFill(ColourGradient(Colour(0xffff4030).withAlpha(0.35f * pil), jc.x, jc.y, Colours::transparentBlack, jc.x + 34, jc.y, true)); g.fillEllipse(jc.x - 34, jc.y - 34, 68, 68); }
@@ -316,14 +329,34 @@ void CD57Editor::paint(Graphics& g)
     g.setColour(kInk); g.setFont(F(13.0f, true));
     g.drawText("OUTPUT  /  SERVICE  (nominal values; changes carry state, see Provenance)", lab_.getX() + 12, lab_.getY() + 4, 700, 16, Justification::left);
     g.setFont(F(10.5f));
-    g.drawText(proc_.irStatus(), lab_.getX() + 12, lab_.getBottom() - 13, lab_.getWidth() - 24, 12, Justification::left);
+    const int externalChoice = (int)std::lround(proc_.apvts.getRawParameterValue(pid::externalLoad)->load());
+    // The external selector takes precedence without altering the original five-choice load parameter.
+    const int loadChoice = externalChoice > 0 ? 4 + externalChoice : (int)std::lround(proc_.apvts.getRawParameterValue(pid::load)->load());
+    String loadGuidance;
+    switch (loadChoice) {
+        case 0: loadGuidance = "Stock wiring: internal 8 ohm Eminence; electrical/acoustic model remains ASSUMED."; break;
+        case 1: loadGuidance = "NOT FENDER-RECOMMENDED: internal + 8 ohm extension. Experimental legacy mode only."; break;
+        case 2: loadGuidance = "BENCH ONLY: 8 ohm resistive dummy load; internal speaker disconnected."; break;
+        case 3: loadGuidance = "BENCH ONLY: 4 ohm resistive dummy load; internal speaker disconnected."; break;
+        case 4: loadGuidance = "BENCH ONLY: 16 ohm resistive dummy load; internal speaker disconnected."; break;
+        case 5: loadGuidance = "Fender-supported jack arrangement: single external 8 ohm; electrical load PROXY, no external acoustics."; break;
+        case 6: loadGuidance = "Fender-supported jack arrangement: two external 16 ohm; electrical load PROXY, no external acoustics."; break;
+        default: loadGuidance = "Unknown load configuration: provisional behavior."; break;
+    }
+    g.setColour(loadChoice == 1 ? Colour(0xffa0241a) : kInk);
+    g.drawText(loadGuidance, lab_.getX() + 12, lab_.getBottom() - 44, lab_.getWidth() - 24, 12, Justification::left);
+    g.setColour(kInk);
+    g.drawText(String(proc_.calibrationStatus()), lab_.getX() + 12, lab_.getBottom() - 29, lab_.getWidth() - 24, 12, Justification::left);
+    g.drawText(proc_.irStatus(), lab_.getX() + 12, lab_.getBottom() - 14, lab_.getWidth() - 24, 12, Justification::left);
 }
 
 void CD57Editor::resized()
 {
     plate_ = {20, 74, getWidth() - 40, 190};
-    // plate: [power | jewel] [knobs ........] [jacks ......]
-    powerSw_.setBounds(plate_.getX() + 30, plate_.getY() + 28, 70, 80);
+    // plate: [standby | power | jewel] [knobs ........] [jacks ......].
+    // Relayout preserves 2+ pixels between the jewel glow and the instrument knob's outer scale.
+    standbySw_.setBounds(plate_.getX() + 22, plate_.getY() + 28, 70, 80);
+    powerSw_.setBounds(plate_.getX() + 105, plate_.getY() + 28, 70, 80);
     auto kb = [&](KnobBox& k, int cx) {
         k.s.setBounds(cx - 52, plate_.getY() + 16, 104, 124); k.l.setBounds(cx - 70, plate_.getY() + 152, 140, 16);
     };
@@ -335,7 +368,7 @@ void CD57Editor::resized()
 
     service_ = {20, 276, 420, 232};
     scopeR_ = {456, 276, getWidth() - 476, 232};
-    lab_ = {20, 520, getWidth() - 40, 292};
+    lab_ = {20, 520, getWidth() - 40, getHeight() - 534};
     const int cols = 4, cw = (lab_.getWidth() - 24) / cols;
     auto place = [&](Component& l, Component& c, int col, int row, bool slider) {
         const int x = lab_.getX() + 12 + col * cw, y = lab_.getY() + 26 + row * 36;
@@ -348,8 +381,9 @@ void CD57Editor::resized()
     place(cV1_.l, cV1_.c, 0, 3, false); place(cV2_.l, cV2_.c, 1, 3, false); place(cRect_.l, cRect_.c, 2, 3, false); place(sSrcR_.l, sSrcR_.s, 3, 3, true);
     place(sVar_.l, sVar_.s, 0, 4, true); place(sSeed_.l, sSeed_.s, 1, 4, true); place(sHum_.l, sHum_.s, 2, 4, true); place(sNoise_.l, sNoise_.s, 3, 4, true);
     place(cInCh_.l, cInCh_.c, 0, 5, false); place(cPlug2_.l, cPlug2_.c, 1, 5, false); place(cPlug2Src_.l, cPlug2Src_.c, 2, 5, false);
-    const int by = lab_.getY() + 26 + 5 * 36 + 4;
-    otSatBtn_.setBounds(lab_.getX() + 12 + 3 * cw, lab_.getY() + 26 + 5 * 36 + 14, cw - 12, 22);
+    place(cExternalLoad_.l, cExternalLoad_.c, 3, 5, false);
+    const int by = lab_.getY() + 26 + 6 * 36 + 4;
+    otSatBtn_.setBounds(lab_.getX() + 12 + 3 * cw, lab_.getY() + 26 + 6 * 36 + 14, cw - 12, 22);
     heatBtn_.setBounds(lab_.getX() + 12, by + 40, 170, 22); bypassBtn_.setBounds(lab_.getX() + 12 + cw, by + 40, 120, 22);
     irBtn_.setBounds(lab_.getX() + 12 + 2 * cw, by + 40, 130, 22); aboutBtn_.setBounds(lab_.getX() + 12 + 3 * cw, by + 40, cw - 12, 22);
 }
@@ -369,6 +403,19 @@ void CD57Editor::showProvenance()
         << "Acoustic stage: PROVISIONAL physics-based cone-velocity -> microphone operator (no measured cabinet data exists).\n"
         << "The Mic position / distance controls only move that provisional model (open-back dipole, piston directivity) and are ignored by the IR modes;\n"
         << "there are no calibrated microphone positions, so they must not be read as physically accurate positions (dossier Sec. 19).\n\n"
+        << "STANDBY: separate automatable switch (ON = PLAY, STBY = silent after supply discharge), matching Fender's documented behavior.\n"
+        << "  * This is an approximate HV supply interruption, NOT a verified electrical placement of the modern switch. POWER remains on,\n"
+        << "    heaters remain warm in standby, and restoring ON resumes without a cold tube startup. Fender recommends standby for 60 seconds\n"
+        << "    after turning POWER on.\n\n"
+        << "SPEAKER LOAD: 'Stock' uses the unmeasured Eminence Special Design alnico proxy. The two supported *external* wiring\n"
+        << "  arrangements use nominal equivalent resistive loads only, with NO captured external driver, cabinet or microphone response.\n"
+        << "  * Fender does NOT recommend using the internal speaker together with the extension jack. That earlier choice is now marked\n"
+        << "    Experimental but retains its original 5-choice parameter index and normalised host automation. Resistive dummy loads are bench modes.\n"
+        << "  * Fender-supported external configurations live in a SEPARATE optional External Setup selector (default NONE), which overrides\n"
+        << "    the original load only while selected. The new selector preserves older preset/DAW automation mappings.\n\n"
+        << "CALIBRATION: " << String(proc_.calibrationStatus()) << "\n"
+        << "  * Exact modern volume-pot tapers are not publicly available; Instrument and Mic have separate specimen-measured map paths.\n"
+        << "  * The Eminence PN 7708599000 Re/Le/fs/Qms/Qes/Mms/Sd and cabinet response have not been physically measured here.\n\n"
         << "USER IR (measured): the file is the impulse response of 'voltage at the speaker terminals -> microphone signal'.\n"
         << "  * Gain is NOT normalised: samples are output-full-scale per terminal-full-scale (28.28 V peak = 0 dBFS). A single 1.0 sample = the\n"
         << "    'Speaker terminals' output exactly. Gains above 0 dBFS need a 32-bit float file. Polarity is preserved.\n"
