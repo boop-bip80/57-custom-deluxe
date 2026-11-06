@@ -19,6 +19,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -70,6 +71,15 @@ static std::vector<double> hannPower(const std::vector<double>& x, size_t N)
     std::vector<double> p(N / 2);
     for (size_t k = 0; k < N / 2; ++k) p[k] = (k == 0 ? 1.0 : 2.0) * std::norm(a[k]) / ((double)N * s2);
     return p;
+}
+
+template <class Fn> static void parallelFor(size_t n, Fn fn)
+{
+    std::atomic<size_t> next{0};
+    const unsigned nt = std::max(1u, std::min(4u, std::thread::hardware_concurrency()));
+    std::vector<std::thread> th;
+    for (unsigned t = 0; t < nt; ++t) th.emplace_back([&] { for (;;) { const size_t i = next++; if (i >= n) break; fn(i); } });
+    for (auto& t : th) t.join();
 }
 
 static std::string gNetlist, gManifest;
@@ -228,6 +238,141 @@ static void sectionA()
          "(still " + f(rows[2][3].bandDb, 1) + " dBFS at 8x for this 60 mV drive). The reference-based sections measure aliasing by differencing against a high-rate run with identical mains phase, which cancels the sidebands.");
 }
 
+// ================================================================================================ B. resampler specification
+// Dossier Sec. 23: "Specify passband ripple, transition width and stopband attenuation for the chosen resamplers. Report their
+// latency and phase behavior."  Everything is measured on the implementation itself (Oversampler::up / ::down), not on its design formula.
+struct ChainSpec {
+    double upRippleDb = 0, dnRippleDb = 0, rtRippleDb = 0;   // peak-to-peak gain variation over the audio band (dB)
+    double minus3Hz = 0, flatEdgeHz = 0;                      // down path: -3 dB frequency, first frequency below -0.01 dB
+    double imageRejDb = 1e9, imageHz = 0;                     // up path: smallest rejection of an image of 0-20 kHz, and where
+    double aliasRejDb = 1e9, aliasHz = 0;                     // down path: smallest rejection of input that folds into 0-20 kHz, and where
+    double delayDevMax = 0;                                   // max |measured delay - latency()| over 1-20 kHz (samples)
+    double latency = 0, latUp = 0, latDown = 0;
+};
+
+// least-squares fit of A sin(w n + phi) to y (Hann-weighted, exact 2x2 normal equations)
+static void fitTone(const double* y, size_t N, double w, double& A, double& phi)
+{
+    double scc = 0, sss = 0, scs = 0, syc = 0, sys = 0;
+    for (size_t n = 0; n < N; ++n) {
+        const double wt = 0.5 - 0.5 * std::cos(2 * M_PI * ((double)n + 0.5) / (double)N), c = std::cos(w * (double)n), s = std::sin(w * (double)n);
+        scc += wt * c * c; sss += wt * s * s; scs += wt * c * s; syc += wt * y[n] * c; sys += wt * y[n] * s;
+    }
+    const double det = scc * sss - scs * scs;
+    const double a = (syc * sss - sys * scs) / det, b = (sys * scc - syc * scs) / det;     // y ~ a cos + b sin
+    A = std::sqrt(a * a + b * b); phi = std::atan2(a, b);
+}
+
+static ChainSpec measureChain(double fs, int log2F)
+{
+    ChainSpec sp;
+    const int F = 1 << log2F;
+    Oversampler os; os.prepare(log2F, fs);
+    sp.latency = os.latency(); sp.latUp = os.latencyUp(); sp.latDown = os.latencyDown();
+    const double fr = fs * F;
+
+    // ---- up path: impulse response at the internal rate -> H(f') for any f'; unity passband gain means sum(h) = F
+    {
+        const int nIn = 1024;
+        std::vector<double> imp(nIn, 0.0), h((size_t)nIn * F);
+        imp[0] = 1.0;
+        os.up(imp.data(), nIn, h.data());
+        size_t last = 0; for (size_t j = 0; j < h.size(); ++j) if (std::fabs(h[j]) > 1e-14) last = j;
+        auto H = [&](double fq) { cplx s = 0; const double w = 2 * M_PI * fq / fr; for (size_t j = 0; j <= last; ++j) s += h[j] * std::polar(1.0, -w * (double)j); return std::abs(s) / F; };
+        double lo = 1e9, hi = -1e9;
+        for (double fq = 0; fq <= kPassbandHz; fq += 50.0) { const double g = 20 * std::log10(H(fq)); lo = std::min(lo, g); hi = std::max(hi, g); }
+        sp.upRippleDb = hi - lo;
+        for (int k = 1; k <= F / 2; ++k)
+            for (double fq = 0; fq <= kPassbandHz; fq += 50.0)
+                for (double sgn : {-1.0, 1.0}) {
+                    const double fi = k * fs + sgn * fq;
+                    if (fi <= kPassbandHz || fi > fr / 2) continue;
+                    const double rej = -20 * std::log10(H(fi) + 1e-30);
+                    if (rej < sp.imageRejDb) { sp.imageRejDb = rej; sp.imageHz = fi; }
+                }
+        if (F == 1) sp.imageRejDb = 300.0;
+    }
+    // ---- down path: tone sweep through Oversampler::down; output tone amplitude = |H(f')| at the folded frequency
+    if (F > 1) {
+        const size_t nOut = 3072, nIn = nOut * F, nFit = 1536;
+        std::vector<double> x(nIn), y(nOut);
+        auto gain = [&](double fq) {
+            double fo = std::fabs(fq - fs * std::round(fq / fs));
+            if (fo < 30.0 || fo > fs / 2 - 30.0) { fq += 41.0; fo = std::fabs(fq - fs * std::round(fq / fs)); }
+            for (size_t j = 0; j < nIn; ++j) x[j] = std::sin(2 * M_PI * fq * (double)j / fr);
+            os.reset(); os.down(x.data(), (int)nOut, y.data());
+            double A, phi; fitTone(y.data() + (nOut - nFit), nFit, 2 * M_PI * fo / fs, A, phi);
+            return std::pair<double, double>(A, fo);
+        };
+        double lo = 1e9, hi = -1e9; bool flatFound = false, m3Found = false;
+        std::vector<std::pair<double, double>> sweep;                         // (f', gain dB)
+        for (double fq = 50.0; fq < fr / 2; fq += (fq < 1.5 * fs ? 50.0 : 500.0)) {
+            const auto g = gain(fq);
+            const double db = 20 * std::log10(g.first + 1e-30);
+            if (fq <= kPassbandHz) { lo = std::min(lo, db); hi = std::max(hi, db); }
+            if (!flatFound && fq > 1000.0 && db < -0.01) { sp.flatEdgeHz = fq; flatFound = true; }
+            if (!m3Found && fq > 1000.0 && db < -3.0103) { sp.minus3Hz = fq; m3Found = true; }
+            if (fq > kPassbandHz && g.second <= kPassbandHz && -db < sp.aliasRejDb) { sp.aliasRejDb = -db; sp.aliasHz = fq; }
+        }
+        sp.dnRippleDb = hi - lo;
+    } else {
+        sp.aliasRejDb = 300.0;
+    }
+    // ---- round trip host -> up -> down -> host: gain flatness and delay against the reported latency
+    {
+        const size_t N = 4096, nFit = 2048;
+        std::vector<double> x(N), mid(N * F), y(N);
+        double lo = 1e9, hi = -1e9;
+        for (double fq = 1000.0; fq <= kPassbandHz; fq += 500.0) {
+            const double fz = fq + 13.0;                                      // avoid bin-centred coincidences
+            for (size_t n = 0; n < N; ++n) x[n] = std::sin(2 * M_PI * fz * (double)n / fs);
+            os.reset(); os.up(x.data(), (int)N, mid.data()); os.down(mid.data(), (int)N, y.data());
+            double A, phi; const double w = 2 * M_PI * fz / fs;
+            fitTone(y.data() + (N - nFit), nFit, w, A, phi);
+            phi -= w * (double)(N - nFit);                                    // phase referred to sample 0
+            const double db = 20 * std::log10(A); lo = std::min(lo, db); hi = std::max(hi, db);
+            double d = phi + w * sp.latency; d -= 2 * M_PI * std::round(d / (2 * M_PI));
+            sp.delayDevMax = std::max(sp.delayDevMax, std::fabs(d / w));
+        }
+        sp.rtRippleDb = hi - lo;
+    }
+    return sp;
+}
+
+static void sectionB()
+{
+    section("B. Resampler specification, measured (dossier Sec. 23)");
+    para("Half-band Kaiser cascade; stage 0 (host rate to 2x) is designed for the host rate with the protected band 0-20 kHz, every higher stage for the same band. All numbers are measured on `Oversampler::up/down` themselves. "
+         "*Alias rejection* = the weakest attenuation, over all input frequencies that fold into 0-20 kHz at the host rate, seen by the down path; "
+         "*image rejection* = the same for the images of 0-20 kHz created by the up path; ripple is peak-to-peak over the passband; *delay error* is the largest deviation of the measured round-trip delay from the reported latency over 1-20 kHz.");
+    struct Row { double fs; int l2; ChainSpec s; };
+    std::vector<Row> rows;
+    for (double fs : {44100.0, 48000.0, 96000.0}) for (int l2 = 1; l2 <= 3; ++l2) rows.push_back({fs, l2, ChainSpec()});
+    parallelFor(rows.size(), [&](size_t i) { rows[i].s = measureChain(rows[i].fs, rows[i].l2); });
+    R << "| host | factor | latency (up + down) | up ripple p-p | down ripple p-p | round-trip ripple p-p | -3 dB point | first below -0.01 dB | alias rejection (worst at) | image rejection (worst at) | delay error |\n|---|---|---|---|---|---|---|---|---|---|---|\n";
+    for (auto& r : rows) {
+        const auto& s = r.s;
+        R << "| " << f(r.fs / 1e3, 1) << " kHz | " << (1 << r.l2) << "x | " << f(s.latency, 0) << " smp (" << f(s.latUp, 3) << " + " << f(s.latDown, 3) << ") | " << f(s.upRippleDb, 5) << " dB | " << f(s.dnRippleDb, 5) << " dB | " << f(s.rtRippleDb, 5)
+          << " dB | " << f(s.minus3Hz / 1e3, 2) << " kHz | " << f(s.flatEdgeHz / 1e3, 2) << " kHz | " << f(s.aliasRejDb, 1) << " dB (" << f(s.aliasHz / 1e3, 1) << " kHz) | " << f(s.imageRejDb, 1) << " dB (" << f(s.imageHz / 1e3, 1) << " kHz) | " << f(s.delayDevMax, 4) << " smp |\n";
+        std::cout << "  " << r.fs << " " << (1 << r.l2) << "x: lat " << s.latency << " (" << s.latUp << "+" << s.latDown << ") ripple up/dn/rt " << f(s.upRippleDb, 5) << "/" << f(s.dnRippleDb, 5) << "/" << f(s.rtRippleDb, 5)
+                  << " -3dB " << f(s.minus3Hz, 0) << " alias " << f(s.aliasRejDb, 1) << "@" << f(s.aliasHz, 0) << " image " << f(s.imageRejDb, 1) << "@" << f(s.imageHz, 0) << " delayErr " << f(s.delayDevMax, 5) << "\n";
+    }
+    R << "\n";
+    bool allInt = true, delayOk = true, rippleOk = true, rejOk = true; double worstRip = 0, worstDelay = 0, worstRej = 1e9;
+    for (auto& r : rows) {
+        allInt = allInt && std::fabs(r.s.latency - std::round(r.s.latency)) < 1e-9;
+        delayOk = delayOk && r.s.delayDevMax < 0.01;
+        rippleOk = rippleOk && r.s.rtRippleDb <= 0.001 && r.s.upRippleDb <= 0.001 && r.s.dnRippleDb <= 0.001;
+        rejOk = rejOk && r.s.aliasRejDb >= 100.0 && r.s.imageRejDb >= 100.0;
+        worstRip = std::max(worstRip, std::max(r.s.rtRippleDb, std::max(r.s.upRippleDb, r.s.dnRippleDb))); worstDelay = std::max(worstDelay, r.s.delayDevMax);
+        worstRej = std::min(worstRej, std::min(r.s.aliasRejDb, r.s.imageRejDb));
+    }
+    check(allInt, "the reported latency is a whole number of host samples at every factor and host rate");
+    check(delayOk, "the measured round-trip delay equals the reported latency within 0.01 sample over 1-20 kHz (linear phase, exact latency)", "worst " + f(worstDelay, 5) + " sample");
+    check(rippleOk, "passband ripple <= 0.001 dB peak-to-peak over 0-20 kHz in the up path, the down path and the round trip (a gain error of 1.2e-4 would already sit at -78 dBFS for a full-scale signal)", "worst " + f(worstRip, 5) + " dB");
+    check(rejOk, "alias rejection of the down path and image rejection of the up path are >= 100 dB for everything that can fold into / image from 0-20 kHz", "worst " + f(worstRej, 1) + " dB");
+}
+
 // ================================================================================================ shared: reference machinery
 // Dossier Sec. 23: "Establish a high-accuracy offline reference at a substantially higher internal rate; compare realtime
 // candidates at several oversampling factors."  The reference is the same model run at R x the host rate with analytic
@@ -235,15 +380,6 @@ static void sectionA()
 // Mains phase: circuit time t sees the signal x(t - D_up), where D_up is the exact delay of the up-sampler.  The
 // reference and the no-resampler core are therefore fed x(t - D_up) so that the 2 x f_mains supply modulation has
 // the same phase relative to the signal as in the candidate; their outputs are read at circuit time (m - D_down)/fs.
-template <class Fn> static void parallelFor(size_t n, Fn fn)
-{
-    std::atomic<size_t> next{0};
-    const unsigned nt = std::max(1u, std::min(4u, std::thread::hardware_concurrency()));
-    std::vector<std::thread> th;
-    for (unsigned t = 0; t < nt; ++t) th.emplace_back([&] { for (;;) { const size_t i = next++; if (i >= n) break; fn(i); } });
-    for (auto& t : th) t.join();
-}
-
 static double besselI0(double x) { double s = 1, t = 1; for (int k = 1; k < 200; ++k) { t *= (x / (2 * k)) * (x / (2 * k)); s += t; if (t < 1e-18 * s) break; } return s; }
 
 // linear-phase Kaiser low-pass (unity DC gain, odd length): passband edge fp, stopband edge fstop (Hz) at sample rate fr, A dB stopband
@@ -297,18 +433,25 @@ struct ThetaCfg {
     bool production() const { return inductive == 0.5 && caps == 0.5 && tube == 1.0; }
     std::string name() const { return "L/OT " + f(inductive, 1) + ", C " + f(caps, 1) + ", 6V6 C " + f(tube, 1); }
 };
-static CoreOut runCore(const EngineParams& p0, double fsInt, const std::vector<double>& u, const ThetaCfg& th = ThetaCfg())
+// the circuit alone at solver rate fsInt (the engine with oversampling off, run at the internal rate), quiescent state solved
+static std::unique_ptr<CD57Engine> makeCore(const EngineParams& p0, double fsInt, const ThetaCfg& th = ThetaCfg())
 {
     EngineParams p = p0; p.oversampleLog2 = 0;
-    CD57Engine e; e.prepare(fsInt, 64, gNetlist, p, gManifest);
+    auto e = std::make_unique<CD57Engine>();
+    e->prepare(fsInt, 64, gNetlist, p, gManifest);
     if (!th.production()) {
-        Network& n = e.amp().network();
+        Network& n = e->amp().network();
         for (auto& c : n.cap()) c.thetaSel = c.thetaSel > 0 ? th.tube : th.caps;      // thetaSel > 0 only on the 6V6 interelectrode capacitors
-        e.amp().prepare(fsInt, th.inductive);
-        e.amp().initialiseQuiescent(0.15);
+        e->amp().prepare(fsInt, th.inductive);
+        e->amp().initialiseQuiescent(0.15);
     }
+    return e;
+}
+static CoreOut runCore(const EngineParams& p0, double fsInt, const std::vector<double>& u, const ThetaCfg& th = ThetaCfg())
+{
+    const auto e = makeCore(p0, fsInt, th);
     CoreOut o; o.y.resize(u.size());
-    AmpCircuit& a = e.amp();
+    AmpCircuit& a = e->amp();
     const Network::Stats base = a.network().stats;
     for (size_t i = 0; i < u.size(); ++i) { a.tick(u[i]); o.y[i] = a.vTerminal(); }
     const Network::Stats& s = a.network().stats;
@@ -391,7 +534,7 @@ static CaseResult runCase(const CaseSpec& cs)
     const size_t nHost = (size_t)std::ceil(cs.stim.winStart * fs) + N;
     const long m0 = (long)(nHost - N);
     EngineParams p = baseParams(); p.oversampleLog2 = cs.log2F; p.load = cs.load;
-    Oversampler os; os.prepare(cs.log2F);
+    Oversampler os; os.prepare(cs.log2F, fs);
     const double dUp = os.latencyUp(), dDown = os.latencyDown();
 
     std::vector<double> xh(nHost);
@@ -505,7 +648,7 @@ static void sectionC(bool quick)
                   << " trunc " << f(res[i].trunc.resDb, 1) << " up " << f(res[i].up.resDb, 1) << " down " << f(res[i].down.resDb, 1) << " dc " << f(res[i].tot.dcMv, 2) << " mV  out " << f(20 * std::log10(res[i].peakV / kFsPeak), 1) << " dBFS pk\n";
 
     // alignment sensitivity: why the exact up-/down-sampler delays and the mains-phase convention matter
-    Oversampler o4; o4.prepare(2);
+    Oversampler o4; o4.prepare(2, 48000.0);
     para("Alignment sensitivity (4x, total residual dBFS). The supply modulates the gain at 2 x f_mains, so the phase of that modulation relative to the signal must be identical in candidate and reference: "
          "'exact' = the alignment used above; 'no mains-step correction' = reference fed at the raw tick time, ignoring that the engine advances the mains phase one internal step before use; "
          "'up-sampler delay ignored' = reference fed with no up-sampler delay (the 4x chain delays the signal by " + f(o4.latencyUp(), 2) + " samples before the circuit sees it).");
@@ -639,6 +782,7 @@ int main(int argc, char** argv)
          "It says nothing about agreement with a physical amplifier.\n";
 
     if (want('A')) sectionA();
+    if (want('B')) sectionB();
     if (want('C')) sectionC(quick);
     if (want('D')) sectionD(quick);
 

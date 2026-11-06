@@ -80,7 +80,7 @@ public:
         maxBlock_ = maxBlock;
         params_ = p;
         netlist_ = netlistText;
-        os_.prepare(p.oversampleLog2); osCone_.prepare(p.oversampleLog2);
+        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_);
         const int F = os_.factor();
         inD_.assign(maxBlock, 0.0); upD_.assign((size_t)maxBlock * F, 0.0);
         vt_.assign((size_t)maxBlock * F, 0.0); vc_.assign((size_t)maxBlock * F, 0.0);
@@ -92,7 +92,7 @@ public:
     void build(const EngineParams& p)
     {
         params_ = p;
-        os_.prepare(p.oversampleLog2); osCone_.prepare(p.oversampleLog2);
+        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_);
         amp_.cfg = makeConfig(p);
         amp_.loadNetlist(netlist_);
         const double fsInt = sr_ * os_.factor();
@@ -114,7 +114,7 @@ public:
     }
 
     void setParams(const EngineParams& p) { pending_ = p; hasPending_ = true; }
-    int latencySamples() const { return (int)std::ceil(os_.latency()); }
+    int latencySamples() const { return (int)std::lround(os_.latency()); }          // exact: the cascade pads its delay to a whole number of samples
     double sampleRate() const { return sr_; }
     const Manifest& manifest() const { return manifest_; }
     const std::string& manifestError() const { return manifestError_; }
