@@ -9,15 +9,17 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
-from fit_speaker_impedance import CaptureError, fit_capture, impedance, load_capture
+from fit_speaker_impedance import CaptureError, fit_capture, impedance, load_capture, write_outputs_safely
 
 
 HERE = Path(__file__).resolve().parent
@@ -36,10 +38,11 @@ class SpeakerImpedanceFitTests(unittest.TestCase):
         self.f = np.geomspace(18.0, 13000.0, 221)
         self.z = impedance(self.f, self.values)
 
-    def write_capture(self, f=None, z=None):
+    def write_capture(self, f=None, z=None, path=None):
         f = self.f if f is None else f
         z = self.z if z is None else z
-        with self.csvpath.open("w", newline="", encoding="utf-8") as out:
+        path = self.csvpath if path is None else path
+        with path.open("w", newline="", encoding="utf-8") as out:
             writer = csv.writer(out)
             writer.writerow(("frequency_hz", "real_ohm", "imag_ohm"))
             for hz, v in zip(f, z):
@@ -154,6 +157,65 @@ class SpeakerImpedanceFitTests(unittest.TestCase):
         self.assertEqual(p.returncode, 2)
         self.assertIn("clean specimen delta", p.stderr)
         self.assertFalse(self.delta.exists())
+
+    def test_separate_repeat_sweep_is_scored_without_refitting(self):
+        self.write_capture()
+        repeat = self.root / "second_recorded_sweep.csv"
+        self.write_capture(path=repeat, z=self.z * (1.0 + 0.0002))
+        success = self.invoke("--validation-csv", str(repeat))
+        self.assertEqual(success.returncode, 0, success.stderr)
+        report = json.loads(self.report.read_text())
+        validated = report["independent_repeat"]
+        self.assertTrue(validated["fit_parameters_frozen"])
+        self.assertLess(validated["fixed_fit_comparison"]["complex_relative_rms_percent"], 0.1)
+        self.assertEqual(validated["source_sha256"], hashlib.sha256(repeat.read_bytes()).hexdigest())
+        self.assertIn("repeat_source_sha256", json.loads(self.delta.read_text())["parameters"]["speaker_Re"]["measured"])
+
+        self.write_capture(path=repeat, z=self.z * 1.25)
+        rejected = self.invoke("--validation-csv", str(repeat), "--overwrite")
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn("independent repeat mismatch", rejected.stderr)
+        self.assertEqual(report, json.loads(self.report.read_text()), "failed validation may not replace a prior passing report")
+
+    def test_repeat_capture_must_be_distinct_from_training_input(self):
+        self.write_capture()
+        rejected = self.invoke("--validation-csv", str(self.csvpath))
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn("distinct recorded sweep", rejected.stderr)
+        duplicate = self.root / "duplicate_bytes.csv"
+        duplicate.write_bytes(self.csvpath.read_bytes())
+        rejected_copy = self.invoke("--validation-csv", str(duplicate))
+        self.assertEqual(rejected_copy.returncode, 2)
+        self.assertIn("byte-identical", rejected_copy.stderr)
+        self.assertFalse(self.delta.exists())
+
+    def test_staging_and_rollback_on_multi_output_failure(self):
+        self.delta.write_bytes(b"ORIGINAL DELTA\n")
+        self.report.write_bytes(b"ORIGINAL REPORT\n")
+        real_replace = os.replace
+        calls = []
+
+        def fail_second_rename(src, dst):
+            calls.append(str(dst))
+            if len(calls) == 2:
+                raise OSError("simulated report publication failure")
+            return real_replace(src, dst)
+
+        with mock.patch("fit_speaker_impedance.os.replace", side_effect=fail_second_rename):
+            with self.assertRaisesRegex(OSError, "simulated report"):
+                write_outputs_safely([(self.delta, {"new": "delta"}), (self.report, {"new": "report"})], overwrite=True)
+        self.assertEqual(self.delta.read_bytes(), b"ORIGINAL DELTA\n")
+        self.assertEqual(self.report.read_bytes(), b"ORIGINAL REPORT\n")
+        self.assertFalse(list(self.root.glob("*.tmp")), "stage and rollback temporary files must be cleaned")
+
+    def test_staging_fails_before_prior_delta_is_replaced(self):
+        self.delta.write_bytes(b"EXISTING CALIBRATION\n")
+        parent_file = self.root / "parent_is_a_file"
+        parent_file.write_text("NOT A DIRECTORY")
+        with self.assertRaises(OSError):
+            write_outputs_safely([(self.delta, {"new": "delta"}),
+                                  (parent_file / "report.json", {"new": "report"})], overwrite=True)
+        self.assertEqual(self.delta.read_bytes(), b"EXISTING CALIBRATION\n")
 
 
 if __name__ == "__main__":

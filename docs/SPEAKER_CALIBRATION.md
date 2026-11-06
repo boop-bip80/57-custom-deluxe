@@ -56,6 +56,18 @@ python3 scripts/fit_speaker_impedance.py \
 
 **Replace every placeholder above with an actual, traceable observation.** By default, outputs are not overwritten; provide fresh paths for a different specimen or repeat, or pass `--overwrite` explicitly for an intentional rerun. Neither the CSV nor specimen template can be used as an output destination. If you use `--template`, pass a correctly structured `cd57-specimen-delta-v1` JSON template with *all* `measured` entries initially `null`; this fitter does not silently propagate prior unrelated measurements.
 
+For a substantially stronger reproducibility check, record a **second actual sweep** of the same suspended speaker, preferably after re-seating the measurement leads and independently checking the fixture against known resistors. Provide that distinct file via:
+
+```bash
+# Append these arguments to the command above:
+--validation-csv /path/to/second-actual-free-air-sweep.csv \
+--max-repeat-rms-percent 5
+```
+
+The second sweep is **not re-fitted**: its complex impedance is compared against the first sweep's *fixed* estimated parameters, with a default rejection gate of 5% complex relative RMS and a frequency-span check. The repeat-file SHA-256, comparison metrics and fixed-parameter flag are saved with the report; the delta also records the repeat hash/error. A repeat using the same instrument/fixture may share the **same systematic calibration error** as the first. This test improves reproducibility evidence, but it is not an independent reference validation or proof of OEM accuracy. For genuine independent verification, change or independently calibrate the measurement chain, verify actual speaker identity, and examine frequency-resolved residuals.
+
+When both a delta and report are requested, the tool stages both JSON files before publishing either. Existing output bytes are retained for rollback if a publication step fails. Each individual rename is atomic, but **two different files cannot be committed atomically as one filesystem transaction**, and a power loss or concurrent external modification can still interrupt the pair. Archive raw captures and verify output hashes after each measured-specimen run.
+
 The generated delta preserves every nominal entry from `data/parameters/specimen_delta_template.json`, adds measured blocks only for the five fit parameters, and leaves the unknown speaker mass, piston area, acoustic, thermal, and all other entries unmeasured. Each measured block records its value/unit, instrument, instrument range, lead/phase compensation, date, mounting, temperature, full input-file SHA-256, held-out residual and approximate local 95% fit interval. The report also records input range, training/holdout errors, parameter bounds/identifiability check and limitations.
 
 After independent review of the data/provenance, merge it with the nominal manifest:
@@ -71,7 +83,7 @@ Pass the merged manifest to offline renders with `--manifest`, or build the plug
 ## Automated acceptance and interpretation
 
 - The fitter rejects missing phase/imaginary component, duplicate/nonfinite frequencies, non-positive real impedance, too few points, too narrow a sweep, an inadequately bracketed resonance peak, missing provenance, cabinet mounting, and parameters on imposed physical bounds.
-- It fits five positive parameters with a robust complex residual, withholding every seventh frequency sample as a deterministic **held-out validation set**. The default reject threshold is 10% held-out complex relative RMS error (`--max-holdout-rms-percent` can tighten it). A fit that passes this broad gate may still be **too poor for scientific comparison**: ideally acquire cleaner data, examine residuals by frequency and compare repeat measurements before adopting a profile. Do not interpret 10% as a precision target.
+- It fits five positive parameters with a robust complex residual, withholding every seventh frequency sample as a deterministic **held-out validation set**. The default reject threshold is 10% held-out complex relative RMS error (`--max-holdout-rms-percent` can tighten it). Because these samples come from the **same sweep**, interleaved holdout points do *not* guard against systematic fixture bias or correlated errors. A fit that passes this broad gate may still be **too poor for scientific comparison**: ideally acquire cleaner data, examine residuals by frequency and compare independent repeat measurements before adopting a profile. Do not interpret 10% as a precision target.
 - A local Jacobian condition-number check rejects badly identifiable fits. Local 95% intervals in the report are *approximate statistical intervals only*; they do not include instrument accuracy, fixture residuals, systematic distortion, environmental changes, parameter correlation beyond linearisation, or inter-unit variation. The fit should be repeated at multiple low levels and temperatures when possible.
 - A synthetic-data unit test can establish that the algorithm reconstructs its own assumed equivalent. **It cannot validate the actual Eminence driver model.** To run synthetic and refusal tests: `python3 scripts/test_fit_speaker_impedance.py -v`.
 

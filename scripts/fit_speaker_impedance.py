@@ -19,9 +19,11 @@ from datetime import date
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -29,7 +31,9 @@ from scipy.optimize import least_squares
 
 PARAMETERS = ("speaker_Re", "speaker_Le", "speaker_fs", "speaker_Qms", "speaker_Qes")
 PARAMETER_UNITS = {"speaker_Re": "ohm", "speaker_Le": "H", "speaker_fs": "Hz", "speaker_Qms": "-", "speaker_Qes": "-"}
-LOWER = np.array([0.1, 1.0e-6, 10.0, 0.3, 0.05], dtype=float)
+# Keep the fitter's permitted range inside Manifest::validateMeasuredPhysical:
+# a produced specimen delta must never be rejected by the manifest range guard.
+LOWER = np.array([0.2, 1.0e-6, 10.0, 0.3, 0.05], dtype=float)
 UPPER = np.array([100.0, 0.05, 1000.0, 100.0, 30.0], dtype=float)
 
 
@@ -110,6 +114,87 @@ def _metrics(freq: np.ndarray, z: np.ndarray, fitted: np.ndarray) -> dict[str, f
         "complex_relative_p95_percent": float(100.0 * np.percentile(err, 95)),
         "complex_relative_max_percent": float(100.0 * np.max(err)),
     }
+
+
+def validate_repeat_capture(freq: np.ndarray, z: np.ndarray, fitted: dict,
+                            original_frequency_range: tuple[float, float],
+                            max_repeat_rms_percent: float) -> dict:
+    """Test a second, separately recorded sweep against fixed fit parameters.
+
+    Re-fitting the second capture would conceal discrepancies; only the original
+    fitted parameter values are used. Repeating the same fixture does NOT detect
+    common-mode calibration errors or authenticate the speaker specimen.
+    """
+    if freq[0] > original_frequency_range[0] * 1.10 or freq[-1] < original_frequency_range[1] * 0.90:
+        raise CaptureError("repeat sweep must cover substantially the original fit frequency span")
+    values = np.array([fitted["values"][name] for name in PARAMETERS], dtype=float)
+    score = _metrics(freq, z, values)
+    if score["complex_relative_rms_percent"] > max_repeat_rms_percent:
+        raise CaptureError(f"independent repeat mismatch {score['complex_relative_rms_percent']:.2f}% exceeds {max_repeat_rms_percent:.2f}%")
+    return score
+
+
+def write_outputs_safely(payloads: list[tuple[Path, dict]], overwrite: bool) -> None:
+    """Stage all JSON files before replacing any output; roll back on rename error.
+
+    Each os.replace() is atomic on its own filesystem. There is no general
+    atomic transaction across multiple filesystem paths. By staging everything
+    first and keeping existing bytes, routine failures do not leave a half-
+    published delta and report. Concurrent external modifications cannot be
+    protected by this process-local rollback.
+    """
+    staged: list[tuple[Path, Path]] = []
+    previous: dict[Path, bytes | None] = {}
+    published: list[Path] = []
+    try:
+        for destination, data in payloads:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.is_dir():
+                raise CaptureError(f"output target is a directory: {destination}")
+            if destination.is_symlink():
+                raise CaptureError(f"output target is a symlink (refuse to alter link identity): {destination}")
+            if destination.exists() and not overwrite:
+                raise CaptureError(f"output JSON already exists: {destination}")
+            previous[destination] = destination.read_bytes() if destination.exists() else None
+            content = json.dumps(data, indent=2, allow_nan=False) + "\n"
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent,
+                                             prefix=f".{destination.name}.", suffix=".tmp", delete=False) as f:
+                stage = Path(f.name)
+                staged.append((destination, stage))
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+        for destination, stage in staged:
+            os.replace(stage, destination)
+            published.append(destination)
+    except (OSError, CaptureError, ValueError):
+        rollback_failures: list[str] = []
+        for destination in reversed(published):
+            try:
+                original = previous[destination]
+                if original is None:
+                    destination.unlink(missing_ok=True)
+                else:
+                    # Atomic restoration as well: never rewrite an existing
+                    # destination in place while it may be in use.
+                    with tempfile.NamedTemporaryFile(mode="wb", dir=destination.parent,
+                                                     prefix=f".{destination.name}.rollback.", suffix=".tmp", delete=False) as f:
+                        restore = Path(f.name)
+                        f.write(original)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    try:
+                        os.replace(restore, destination)
+                    finally:
+                        restore.unlink(missing_ok=True)
+            except OSError as exc:
+                rollback_failures.append(f"{destination}: {exc}")
+        if rollback_failures:
+            raise CaptureError("output publication failed AND rollback failed: " + "; ".join(rollback_failures))
+        raise
+    finally:
+        for _, stage in staged:
+            stage.unlink(missing_ok=True)
 
 
 def fit_capture(freq: np.ndarray, z: np.ndarray, max_holdout_rms_percent: float = 10.0) -> dict:
@@ -203,6 +288,7 @@ def make_delta(template: Path, result: dict, provenance: dict) -> dict:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--csv", required=True, type=Path, help="calibrated free-air complex impedance CSV")
+    p.add_argument("--validation-csv", type=Path, help="optional second independent free-air complex sweep; checked without re-fitting")
     p.add_argument("--delta", required=True, type=Path, help="output specimen delta JSON")
     p.add_argument("--report", type=Path, help="optional fit metrics/provenance JSON")
     p.add_argument("--overwrite", action="store_true", help="explicitly permit replacing existing output JSON files")
@@ -217,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--temperature-c", required=True, type=float, help="voice-coil/ambient temperature in degrees Celsius")
     p.add_argument("--max-holdout-rms-percent", type=float, default=10.0,
                    help="refuse to emit a measured profile if held-out complex relative RMS exceeds this")
+    p.add_argument("--max-repeat-rms-percent", type=float, default=5.0,
+                   help="when --validation-csv is given, reject fixed-parameter repeat RMS over this percent")
     here = Path(__file__).resolve().parents[1]
     p.add_argument("--template", type=Path, default=here / "data/parameters/specimen_delta_template.json")
     args = p.parse_args(argv)
@@ -235,7 +323,13 @@ def main(argv: list[str] | None = None) -> int:
             raise CaptureError("temperature must be a plausible finite value (-20 to 80 C)")
         if not 0 < args.max_holdout_rms_percent <= 100:
             raise CaptureError("max holdout RMS must be within (0,100]")
+        if not math.isfinite(args.max_repeat_rms_percent) or not 0 < args.max_repeat_rms_percent <= 100:
+            raise CaptureError("max repeat RMS must be within (0,100]")
         inputs = {args.csv.resolve(), args.template.resolve()}
+        if args.validation_csv:
+            if args.validation_csv.resolve() == args.csv.resolve():
+                raise CaptureError("--validation-csv must be a distinct recorded sweep, not the training CSV")
+            inputs.add(args.validation_csv.resolve())
         outputs = [args.delta.resolve()] + ([args.report.resolve()] if args.report else [])
         if len(set(outputs)) != len(outputs) or any(path in inputs for path in outputs):
             raise CaptureError("output paths must be distinct and may not replace input CSV or template")
@@ -243,6 +337,21 @@ def main(argv: list[str] | None = None) -> int:
             raise CaptureError("output JSON already exists; choose a fresh path or explicitly pass --overwrite")
         freq, z, digest = load_capture(args.csv)
         fitted = fit_capture(freq, z, args.max_holdout_rms_percent)
+        validation = None
+        if args.validation_csv:
+            repeat_frequency, repeat_z, repeat_hash = load_capture(args.validation_csv)
+            if repeat_hash == digest:
+                raise CaptureError("--validation-csv is byte-identical to primary capture, not evidence of a separately recorded repeat")
+            validation = {
+                "source_sha256": repeat_hash,
+                "input_rows": len(repeat_frequency),
+                "input_frequency_range_Hz": [float(repeat_frequency[0]), float(repeat_frequency[-1])],
+                "fit_parameters_frozen": True,
+                "fixed_fit_comparison": validate_repeat_capture(
+                    repeat_frequency, repeat_z, fitted,
+                    (float(freq[0]), float(freq[-1])), args.max_repeat_rms_percent),
+                "limitation": "Repeat uses the same stated specimen/fixture; a common calibration bias can pass both sweeps.",
+            }
         provenance = {"specimen_serial": args.specimen_serial, "speaker_label": args.speaker_label,
                       "instrument": args.instrument, "instrument_range": args.instrument_range,
                       "calibration_method": args.calibration_method, "date": args.date,
@@ -253,12 +362,18 @@ def main(argv: list[str] | None = None) -> int:
                   "model": "linear electromechanical equivalent; NOT an authenticated Eminence OEM curve",
                   "fit": fitted,
                   "not_identified": ["speaker_Mms", "speaker_Sd", "speaker_Bl_of_x_and_Kms_of_x", "cabinet/microphone transfer"]}
-        args.delta.parent.mkdir(parents=True, exist_ok=True)
-        args.delta.write_text(json.dumps(delta, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        if validation is not None:
+            report["independent_repeat"] = validation
+            for key in PARAMETERS:
+                delta["parameters"][key]["measured"]["repeat_source_sha256"] = validation["source_sha256"]
+                delta["parameters"][key]["measured"]["repeat_complex_relative_rms_percent"] = validation["fixed_fit_comparison"]["complex_relative_rms_percent"]
+        payloads = [(args.delta, delta)]
         if args.report:
-            args.report.parent.mkdir(parents=True, exist_ok=True)
-            args.report.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+            payloads.append((args.report, report))
+        write_outputs_safely(payloads, args.overwrite)
         print(f"PASS: fitted calibrated {args.mounting} sweep; held-out RMS {fitted['holdout']['complex_relative_rms_percent']:.3f}% ; {len(freq)} points")
+        if validation is not None:
+            print(f"  independent repeat: {validation['fixed_fit_comparison']['complex_relative_rms_percent']:.3f}% complex relative RMS (fixed fit; not an independent fixture calibration)")
         for k,v in fitted["values"].items():
             print(f"  {k}: {v:.8g}")
         print("  Mms, Sd, nonlinearities and cabinet acoustics were NOT inferred")
