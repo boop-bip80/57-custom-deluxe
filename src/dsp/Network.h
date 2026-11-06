@@ -747,7 +747,7 @@ private:
         for (auto& t : tri_) {
             const double vgk = V(t.g) - V(t.k), vpk = V(t.p) - V(t.k);
             TriodeOut o;
-            evalTriode(t.par, vgk, vpk, emission_[t.emGroup] * t.scale, o);
+            evalTriodeFast(t.par, vgk, vpk, emission_[t.emGroup] * t.scale, o);
             t.ip = o.ip; t.ig = o.ig;
             if (t.p >= 0) F_[t.p] += o.ip;
             if (t.g >= 0) F_[t.g] += o.ig;
@@ -763,7 +763,7 @@ private:
         for (auto& q : pen_) {
             const double vgk = V(q.g) - V(q.k), vpk = V(q.p) - V(q.k), vsk = V(q.s) - V(q.k);
             PentodeOut o;
-            evalPentode(q.par, vgk, vpk, vsk, emission_[q.emGroup] * q.scale, o);
+            evalPentodeFast(q.par, vgk, vpk, vsk, emission_[q.emGroup] * q.scale, o);
             q.ip = o.ip; q.is = o.is; q.ig = o.ig;
             if (q.p >= 0) F_[q.p] += o.ip;
             if (q.s >= 0) F_[q.s] += o.is;

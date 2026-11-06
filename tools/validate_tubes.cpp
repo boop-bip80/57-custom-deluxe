@@ -251,6 +251,36 @@ void transcription()
     std::printf("  INFO  EXTERNAL RCA 6V6GT rating point 250 V / 250 V / -12.5 V (not in the dossier): model Ip = %.1f mA (RCA 45), Is = %.1f mA (RCA 4.5)\n", o.ip * 1e3, o.is * 1e3);
 }
 
+// the realtime solver evaluates the same laws through lookup tables (Devices.h): they must agree with the closed forms
+void tables()
+{
+    auto rel = [](double a, double b, double scale) { return std::fabs(a - b) / (std::fabs(b) + scale); };
+    for (const char* type : {"12AY7", "12AX7"}) {
+        const TriodeParams p = triodeParams(type);
+        double worst = 0, worstD = 0;
+        for (double vg = -60.0; vg <= 6.0; vg += 0.0371)
+            for (double vp = -20.0; vp <= 500.0; vp += 1.37) {
+                TriodeOut a, b;
+                evalTriode(p, vg, vp, 1.0, a); evalTriodeFast(p, vg, vp, 1.0, b);
+                worst = std::max({worst, rel(b.ip, a.ip, 1e-9), rel(b.ig, a.ig, 1e-9)});
+                worstD = std::max({worstD, rel(b.dip_dvgk, a.dip_dvgk, 1e-9), rel(b.dip_dvpk, a.dip_dvpk, 1e-10), rel(b.dig_dvgk, a.dig_dvgk, 1e-9)});
+            }
+        check(worst < 1e-6 && worstD < 1e-5, std::string(type) + ": realtime table evaluation equals the closed-form law (currents and Jacobian)", fmt("worst relative error %.1e (currents), %.1e (derivatives)", worst, worstD));
+    }
+    const PentodeParams p = pentodeParams();
+    double worst = 0, worstD = 0;
+    for (double vg = -80.0; vg <= 25.0; vg += 0.0731)
+        for (double vp = -20.0; vp <= 520.0; vp += 3.7)
+            for (double vs = -10.0; vs <= 480.0; vs += 23.3) {
+                PentodeOut a, b;
+                evalPentode(p, vg, vp, vs, 1.0, a); evalPentodeFast(p, vg, vp, vs, 1.0, b);
+                worst = std::max({worst, rel(b.ip, a.ip, 1e-9), rel(b.is, a.is, 1e-9), rel(b.ig, a.ig, 1e-9)});
+                for (int k = 0; k < 3; ++k) worstD = std::max({worstD, rel(b.dip[k], a.dip[k], 1e-10), rel(b.dis[k], a.dis[k], 1e-10)});
+                worstD = std::max(worstD, rel(b.dig_dvgk, a.dig_dvgk, 1e-9));
+            }
+    check(worst < 1e-6 && worstD < 1e-5, "6V6: realtime table evaluation equals the closed-form law (currents and Jacobian)", fmt("worst relative error %.1e (currents), %.1e (derivatives)", worst, worstD));
+}
+
 } // namespace
 
 int main()
@@ -260,6 +290,7 @@ int main()
     continuity();
     physical();
     transcription();
+    tables();
     std::printf("\nSUMMARY: %d passed, %d failed\n", nPass, nFail);
     return nFail ? 1 : 0;
 }
