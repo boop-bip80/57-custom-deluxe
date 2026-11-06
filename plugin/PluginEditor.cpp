@@ -163,6 +163,8 @@ CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(
     powerAtt_->sendInitialUpdate();
 
     combo(cPatch_, pid::patch, "Jumper cable");
+    combo(cPlug2_, pid::plug2, "Second plug");
+    combo(cPlug2Src_, pid::plug2Src, "Second plug source");
     combo(cLoad_, pid::load, "Speaker load");
     combo(cOut_, pid::outMode, "Output");
     combo(cMarket_, pid::market, "Market variant");
@@ -345,9 +347,9 @@ void CD57Editor::resized()
     place(sTrim_.l, sTrim_.s, 0, 2, true); place(sOutLevel_.l, sOutLevel_.s, 1, 2, true); place(sInCal_.l, sInCal_.s, 2, 2, true); place(cSource_.l, cSource_.c, 3, 2, false);
     place(cV1_.l, cV1_.c, 0, 3, false); place(cV2_.l, cV2_.c, 1, 3, false); place(cRect_.l, cRect_.c, 2, 3, false); place(sSrcR_.l, sSrcR_.s, 3, 3, true);
     place(sVar_.l, sVar_.s, 0, 4, true); place(sSeed_.l, sSeed_.s, 1, 4, true); place(sHum_.l, sHum_.s, 2, 4, true); place(sNoise_.l, sNoise_.s, 3, 4, true);
-    place(cInCh_.l, cInCh_.c, 0, 5, false);
+    place(cInCh_.l, cInCh_.c, 0, 5, false); place(cPlug2_.l, cPlug2_.c, 1, 5, false); place(cPlug2Src_.l, cPlug2Src_.c, 2, 5, false);
     const int by = lab_.getY() + 26 + 5 * 36 + 4;
-    otSatBtn_.setBounds(lab_.getX() + 12 + cw, lab_.getY() + 26 + 5 * 36 + 8, 2 * cw - 12, 22);
+    otSatBtn_.setBounds(lab_.getX() + 12 + 3 * cw, lab_.getY() + 26 + 5 * 36 + 14, cw - 12, 22);
     heatBtn_.setBounds(lab_.getX() + 12, by + 40, 170, 22); bypassBtn_.setBounds(lab_.getX() + 12 + cw, by + 40, 120, 22);
     irBtn_.setBounds(lab_.getX() + 12 + 2 * cw, by + 40, 130, 22); aboutBtn_.setBounds(lab_.getX() + 12 + 3 * cw, by + 40, cw - 12, 22);
 }

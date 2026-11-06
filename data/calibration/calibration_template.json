@@ -1,0 +1,46 @@
+{
+ "schema": "cd57-calibration-v1",
+ "kind": "hardware_template",
+ "note": "Fill in for a physical measurement session (dossier Sec. 24, 25, 30). Null = not recorded. A comparison with cd57_compare is only meaningful once these are known; do not re-fit a gain per clip (Sec. 26).",
+ "specimen_serial": null,
+ "volts_per_full_scale_input_sample": null,
+ "output_samples_per_volt": null,
+ "source_impedance_ohm": null,
+ "fixed_delay_samples": null,
+ "reamp_chain": {
+  "interface_model": null,
+  "dac_gain_setting": null,
+  "reamp_box_or_series_resistor": null,
+  "frequency_response_measured": null,
+  "source_impedance_measured_ohm": null
+ },
+ "capture_chain": {
+  "adc_model": null,
+  "adc_gain_setting": null,
+  "output_attenuator": {
+   "model": null,
+   "attenuation_db": null,
+   "rated_for_speaker_output": null
+  },
+  "reference_channel_recorded": null,
+  "clock_relationship": null
+ },
+ "load": {
+  "resistive_reference_ohm": null,
+  "speaker_label": null,
+  "speaker_cold_resistance_ohm": null
+ },
+ "mains": {
+  "volts": null,
+  "hz": null,
+  "variac_setting_percent": null
+ },
+ "warmup": {
+  "minutes": null,
+  "state": null
+ },
+ "ambient_temperature_c": null,
+ "sample_rate_hz": null,
+ "operator_notes": null,
+ "safety": "Internal amplifier nodes carry dangerous voltage even after power is removed; a qualified technician performs internal measurements with rated instruments. Speaker output needs a suitable load and rated measurement attenuation and must never be connected directly to an audio-interface input (dossier Sec. 24)."
+}

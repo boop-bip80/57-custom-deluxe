@@ -1,0 +1,49 @@
+{
+ "schema": "cd57-calibration-v1",
+ "kind": "model",
+ "reference_boundary": "input_jack_to_speaker_terminals",
+ "note": "The calibration the MODEL ships with (dossier Sec. 24: physical volts inside, conversions at explicit boundaries). These are plugin controls and fixed conventions, NOT Fender numbers and NOT measurements of an interface.",
+ "volts_per_full_scale_input_sample": {
+  "value": 1.0,
+  "unit": "V peak per full-scale sample",
+  "status": "assumed",
+  "interval": [
+   0.1,
+   5.0
+  ],
+  "control": "Input Cal (V pk @ FS); with Input Trim +-12 dB the jack never exceeds 20 V; the solver is validated to a 30 V peak at the jack"
+ },
+ "output_reference_volts": {
+  "value": 28.28,
+  "unit": "V peak at the speaker terminals for 0 dBFS",
+  "status": "proposed",
+  "note": "rated 12.5 W sine into 8 ohm = 14.14 V peak = -6 dBFS (dossier Sec. 02 derived reference)"
+ },
+ "output_samples_per_volt": {
+  "value": 0.03536,
+  "unit": "1/V",
+  "status": "proposed",
+  "note": "= 1 / 28.28 V"
+ },
+ "source_impedance_ohm": {
+  "value": 100.0,
+  "status": "assumed",
+  "interval": [
+   1.0,
+   10000.0
+  ],
+  "note": "line/DI mode; a passive pickup + cable model (6 kohm, 2.5 H, 500 pF) is selectable"
+ },
+ "fixed_delay_samples": {
+  "value": "derived",
+  "note": "the oversampler's whole-sample latency, reported to the host and removed by the offline tools: 2x = 79 / 45 / 13 samples at 44.1 / 48 / 96 kHz; 4x = 87 / 52 / 19; 8x = 90 / 55 / 21; 1x = 0"
+ },
+ "worked_example_sec24": {
+  "statement": "a sine whose digital peak is -18 dBFS produces 0.100 V RMS at the amp jack",
+  "digital_peak": 0.12589254117941673,
+  "K_in_volts_per_full_scale": 1.1233497625229583,
+  "dossier_value": 1.12335,
+  "reproduced_by": "cd57_validate section 10 (checks K_in = 1.12335 and the engine's digital-to-jack conversion to 0.100 V RMS)"
+ },
+ "peak_rms_conventions": "digital peak A -> jack RMS = K_in A / sqrt(2); peak, RMS and peak-to-peak are never mixed (dossier Sec. 24)"
+}

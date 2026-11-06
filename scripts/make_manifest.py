@@ -14,13 +14,40 @@ import json, os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 fits = json.load(open(os.path.join(ROOT, "data/tubes/fitted_models.json")))
 
+# Source revisions, exactly as the dossier's source catalogue (Sec. 32) states them.  A source the project could not fetch is still cited with the
+# revision the DOSSIER gives; docs/SOURCE_CATALOGUE.md says which ones were actually available to this implementation.
+REVISION = {
+    "S01": "Fender product page and photographs, retrieved 5 Nov 2026",
+    "S02": "Owner's Manual PN 7708607000 Rev. A (c) 2016",
+    "S03": "original Deluxe 5E3 schematic, archive copy (undated)",
+    "S04": "service drawing 0073201000 Rev. B, 17 Nov 2006 ('57 Deluxe / Fender 57; NOT the modern Custom model)",
+    "S05": "Rob Robinette, How the Fender 5E3 Deluxe Works (annotated schematic and layout, undated web page)",
+    "S10": "Mercury Magnetics FTDO-59 product page (historical 5E3 replacement, 8 kOhm : 8 Ohm)",
+    "S11": "Eminence speaker FAQ (OEM identification)",
+    "S18": "RCA 12AX7 datasheet, archive copy",
+    "S19": "6V6GT / 5V6GT datasheet, Valve Museum archive",
+    "S21": "JJ Electronic 12AY7 characteristic sheet, retrieved 5 Nov 2026",
+    "S22": "JJ Electronic 6V6S characteristic sheet, retrieved 5 Nov 2026",
+    "S23": "JJ Electronic 5Y3S characteristic sheet, retrieved 5 Nov 2026",
+    "S24": "JJ Electronic ECC83S / 12AX7 characteristic sheet, retrieved 5 Nov 2026",
+}
+def revision_of(source):
+    if not source: return None
+    ids = [x.strip() for x in source.split(",") if x.strip() in REVISION]
+    return "; ".join(f"{i}: {REVISION[i]}" for i in ids) if ids else None
+
 P = {}
-def add(name, value, unit, status, source=None, interval=None, note=None, verified=None):
+def add(name, value, unit, status, source=None, interval=None, note=None, verified=None, branch=None):
     d = {"value": value, "unit": unit, "status": status}
     if source: d["source"] = source
     if interval: d["interval"] = interval
     if note: d["note"] = note
     if verified is not None: d["verified_on_modern_specimen"] = verified
+    # Sec. 04 provenance: branch, source revision, serial range, uncertainty.  Nominal entries are not tied to a serial range (null).
+    d["branch"] = branch or ("historical_5e3" if status == "historical_nominal" else "modern_nominal")
+    d["source_revision"] = revision_of(source)
+    d["serial_range"] = None
+    d["uncertainty"] = {"kind": "sensitivity_interval", "lo": interval[0], "hi": interval[1]} if interval else None
     P[name] = d
 
 # ---- CONFIRMED target specification (dossier Sec. 02)
@@ -45,20 +72,25 @@ add("rated_output_peak_voltage_sine", 14.142, "V", "derived", "S01")
 # ---- HISTORICAL circuit values are carried in data/netlist/cd57_nominal.net with per-element evidence tags
 add("netlist", "data/netlist/cd57_nominal.net", "-", "historical_nominal", "S03,S05",
     note="topology and component values are the historical 5E3 baseline; modern service schematic not authenticated (dossier Sec. 04)", verified=False)
-add("ot_turns_ratio_full_primary", 31.6228, "ratio", "historical_nominal", "S10", note="FTDO-59 8k:8 class; identity with modern OEM part unproven", verified=False)
+add("ot_turns_ratio_full_primary", 31.6227766, "ratio", "historical_nominal", "S10", note="DRIVES THE MODEL: full-primary : secondary turns ratio, sqrt(8000/8) (dossier Sec. 12 prints 31.6228); FTDO-59 8k:8 class, identity with the modern OEM part unproven", verified=False)
 
 # ---- ASSUMED (explicit assumption + sensitivity interval, dossier Sec. 28)
 add("pt_hv_half_winding_rms", 377.4, "V", "assumed", "calibration", [330.0, 400.0],
     note="supply transformer parameters UNKNOWN; value CALIBRATED (cd57_validate --calibrate-pt) so the interpolated 5% THD power into 8 ohm equals the documented 12.5 W for the JJ-fitted tube laws; the anchor weakly constrains this value (see the sensitivity table in the validation report)")
 add("pt_series_resistance_per_half", 90.0, "ohm", "assumed", None, [50.0, 150.0], note="PT secondary + reflected primary resistance")
-add("ot_primary_inductance_full", 25.0, "H", "assumed", None, [10.0, 60.0])
-add("ot_leakage_inductance_full_ref", 0.040, "H", "assumed", None, [0.01, 0.08])
-add("ot_dcr_primary_half", 125.0, "ohm", "assumed", None, [80.0, 200.0])
-add("ot_dcr_secondary", 0.35, "ohm", "assumed", None, [0.2, 0.6])
+add("ot_primary_inductance_full", 25.5, "H", "assumed", None, [10.0, 60.0], note="DRIVES THE MODEL: small-signal magnetising inductance of the full primary, secondary open, = N_full^2 (P0 + Pair) with the netlist's Pair = 0.5 mH (so the netlist's P0 = 25 mH <-> 25.5 H); value is a guess, not a measurement")
+add("ot_leakage_inductance_full_ref", 0.040, "H", "assumed", None, [0.01, 0.08], note="DRIVES THE MODEL: total leakage referred to the full primary = Lla + Llb + n^2 Lls; the netlist's split between windings is kept in proportion")
+add("ot_dcr_primary_half", 125.0, "ohm", "assumed", None, [80.0, 200.0], note="DRIVES THE MODEL: DC resistance of one primary half (Ra = Rb)")
+add("ot_dcr_secondary", 0.35, "ohm", "assumed", None, [0.2, 0.6], note="DRIVES THE MODEL")
 add("ot_core_saturation_flux_per_secondary_turn", 0.060, "V*s", "assumed", None, [0.04, 0.09], note="no public saturation data (dossier Sec. 12)")
 add("tube_interelectrode_capacitances", "12AX7/12AY7 1.5-1.7/1.5-1.7/0.46-0.5 pF, 6V6 9.5/0.7/7.5 pF", "pF", "assumed", None, note="datasheet-class values that are NOT contained in the dossier text (external, unverified offline)")
 add("triode_grid_conduction_law", "I=k*(s*softplus((vgk-vc)/s))^1.5 (k=0.35 mA/V^1.5, vc=-0.5 V, s=0.15 V)", "-", "assumed", None, note="no grid-current data for the 12AY7/12AX7 in the dossier; onset and slope need measurements (dossier Sec. 16)")
-add("volume_pot_taper", None, "fraction_vs_angle", "unknown", "S01", note="manufacturer advertises revised tapers; numerical law not located")
+add("volume_pot_taper", None, "fraction_vs_angle", "unknown", "S01", note="manufacturer advertises revised tapers; numerical law not located. The measured maps go in the three per-pot entries below")
+POTUNIT = "fraction_vs_angle_11pt"
+POTNOTE = "MEASURED MAP (dossier Sec. 08/28): electrical fraction alpha = R(grounded end -> wiper) / R_total at knob rotation 0, 0.1, ..., 1.0 (11 values, monotonic, 0..1), from a resistance-versus-angle measurement; a valid map replaces the assumed taper"
+add("volume_pot_taper_instrument", None, POTUNIT, "unknown", "S01", note="Instrument volume. " + POTNOTE)
+add("volume_pot_taper_mic", None, POTUNIT, "unknown", "S01", note="Mic volume. " + POTNOTE)
+add("tone_pot_taper", None, POTUNIT, "unknown", "S01", note="Tone pot: alpha measured from the 5 nF end to the wiper. " + POTNOTE)
 add("volume_pot_taper_provisional", "audio, alpha(0.5)=0.15", "-", "assumed", None, note="selectable in the plugin (audio-15 / audio-10 / linear); not claimed as the modern Fender taper")
 add("tone_pot_taper_provisional", "linear", "-", "assumed")
 add("pot_total_resistance", 1.0e6, "ohm", "historical_nominal", "S03", [0.8e6, 1.2e6])
@@ -114,7 +146,20 @@ add("calibration_volts_per_full_scale_input_sample", 1.0, "V", "assumed", None, 
 add("calibration_output_samples_per_volt", 0.03536, "1/V", "proposed", None, note="0 dBFS = 28.28 V peak at the speaker terminals (rated 12.5 W sine, 14.14 V peak = -6 dBFS)")
 add("source_impedance", 100.0, "ohm", "assumed", None, [0.0, 10000.0], note="line/DI default; pickup+cable model optional")
 
+BRANCHES = {
+    "historical_5e3": {"sources": ["S03", "S05", "S10"], "carried_by": "data/netlist/cd57_nominal.net (elements tagged HIST) and the historical_nominal manifest entries",
+                       "note": "Original 5E3 topology and nominal values. Not modern manufacturing verification (Sec. 04)."},
+    "reissue_2006": {"sources": ["S04"], "carried_by": "NOTHING numeric: the service drawing 0073201000 Rev. B was not available to this implementation",
+                     "note": "Earlier reissue generation. Its values must not be assigned to the modern unit automatically (Sec. 04, 14); a delta with branch 'reissue_2006' can carry them once the drawing is read."},
+    "modern_nominal": {"sources": ["S01", "S02"], "carried_by": "manufacturer_documented, derived, assumed, proposed and candidate_fit entries",
+                       "note": "The modern Custom Deluxe as far as public documents establish it, on top of the historical topology. This is the profile the plugin ships."},
+    "specimen": {"sources": [], "carried_by": "a specimen delta merged with `cd57_manifest merge` (see data/parameters/specimen_delta_template.json); empty in the shipped manifest",
+                 "note": "Measured values of one serial-numbered amplifier, stored beside the nominal ones, never instead of them."},
+}
+
 manifest = {
+    "schema_version": 2,
+    "branches": BRANCHES,
     "target": "Fender 57 Custom Deluxe",
     "model_family": "815050",
     "pr_number": "PR 728",
@@ -133,3 +178,38 @@ with open(os.path.join(ROOT, "data/parameters/cd57_nominal.json"), "w") as f:
 from collections import Counter
 c = Counter(v["status"] for v in P.values())
 print("wrote manifest:", len(P), "parameters;", dict(c))
+
+# ---- specimen delta template: every parameter the model reads, measured = null (a null changes nothing).  Hints say what the dossier asks to measure.
+HINT = {
+    "pt_hv_half_winding_rms": "AC RMS of ONE half of the high-voltage secondary (centre tap to one anode), unloaded or at stated load; record mains volts and Hz (Sec. 11, 12, 25)",
+    "pt_series_resistance_per_half": "DC resistance of one HV half-winding plus the reflected primary resistance (Sec. 12)",
+    "ot_turns_ratio_full_primary": "full-primary : secondary turns ratio from a low-level voltage ratio with the other windings open (Sec. 12)",
+    "ot_primary_inductance_full": "small-signal inductance of the full primary, secondary open, at a stated frequency and level (Sec. 12)",
+    "ot_leakage_inductance_full_ref": "leakage inductance referred to the full primary, secondary shorted (Sec. 12)",
+    "ot_dcr_primary_half": "DC resistance of one primary half (Sec. 12)",
+    "ot_dcr_secondary": "DC resistance of the secondary (Sec. 12)",
+    "ot_core_saturation_flux_per_secondary_turn": "ONLY if a saturation measurement exists (Sec. 12, 29: do not assign a law before evidence); switch the option on to use it",
+    "pot_total_resistance": "end-to-end resistance of the volume/tone pots (Sec. 08)",
+    "pot_endpoint_contact_resistance": "wiper resistance at the grounded end stop (Sec. 08)",
+    "speaker_Re": "voice-coil DC resistance, cold (Sec. 17)",
+    "speaker_Le": "voice-coil inductance from the complex impedance fit (Sec. 17)",
+    "speaker_fs": "free-air resonance (Sec. 17)", "speaker_Qms": "mechanical Q (Sec. 17)", "speaker_Qes": "electrical Q (Sec. 17)",
+    "speaker_Mms": "moving mass (sets acoustic sensitivity only; no electrical effect when fs, Qms, Qes are given)", "speaker_Sd": "effective piston area",
+    "speaker_voice_coil_tempco": "only if the conductor is verified (Sec. 18)", "speaker_thermal_Cth": "warming/cooling fit (Sec. 18)", "speaker_thermal_Rth": "warming/cooling fit (Sec. 18)",
+    "volume_pot_taper_instrument": "11 alpha values at knob 0, 0.1, ..., 1.0 (Sec. 08)", "volume_pot_taper_mic": "11 alpha values at knob 0, 0.1, ..., 1.0 (Sec. 08)", "tone_pot_taper": "11 alpha values at knob 0, 0.1, ..., 1.0, from the 5 nF end (Sec. 08)",
+}
+tpl = {
+    "schema": "cd57-specimen-delta-v1",
+    "delta_of_profile": manifest["profile"],
+    "branch": "specimen",
+    "how_to_use": ("Fill in 'measured' for the parameters you measured, leave the others null (null changes nothing), fill the 'specimen' block, then: "
+                   "cd57_manifest merge data/parameters/cd57_nominal.json YOUR_DELTA.json merged.json  and render with --manifest merged.json "
+                   "(cd57_capture_matrix, cd57_render) or build the plugin with -DCD57_MANIFEST=merged.json. Every measured block needs value, unit (the entry's unit), "
+                   "instrument and date; record the instrument range and lead compensation (Sec. 04). Nominal values stay in the file beside the measured ones."),
+    "specimen": {"serial": None, "revision": None, "market": None, "tube_markings": None, "speaker_label": None, "photo_ids": []},
+    "parameters": {k: {"hint": HINT.get(k, ""), "unit": P[k]["unit"], "nominal": P[k]["value"], "measured": None} for k in HINT},
+}
+for k in HINT: assert k in P, k
+with open(os.path.join(ROOT, "data/parameters/specimen_delta_template.json"), "w") as f:
+    json.dump(tpl, f, indent=1)
+print("wrote specimen_delta_template.json:", len(HINT), "parameters (all measured = null)")

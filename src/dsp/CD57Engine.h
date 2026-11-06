@@ -36,6 +36,7 @@ struct EngineParams {
     // front panel (knob rotation 0..1)
     float instVol = 0.55f, micVol = 0.0f, tone = 0.65f;
     int jack = 1, patch = 0, load = 0;
+    int jack2 = 0;                       // second plug: 0 none, 1 Instrument 1, 2 Instrument 2, 3 Mic 1, 4 Mic 2 (driven by process()'s second input, or terminated)
     bool power = true;
     // plugin I/O calibration
     float inputTrimDb = 0.0f, outputDb = 0.0f;
@@ -85,16 +86,20 @@ public:
         // manifest-derived circuit values are resolved ONCE here (string-keyed lookups allocate); makeConfig() on the audio thread
         // then only copies this and applies the plugin controls
         baseCfg_ = AmpConfig{};
-        if (manifestOk_) manifest_.apply(baseCfg_);
+        if (manifestOk_) {
+            // a measured pot map that is not a valid map is a manifest error, reported exactly like a rejected manifest
+            const std::string applyErr = manifest_.apply(baseCfg_);
+            if (!applyErr.empty()) { manifestError_ = applyErr; manifestOk_ = false; baseCfg_ = AmpConfig{}; }
+        }
         sr_ = sampleRate;
         maxBlock_ = maxBlock;
         params_ = p;
         netlist_ = netlistText;
-        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_);
+        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_); osCur_.prepare(p.oversampleLog2, sr_); os2_.prepare(p.oversampleLog2, sr_);
         const int F = os_.factor();
-        inD_.assign(maxBlock, 0.0); upD_.assign((size_t)maxBlock * F, 0.0);
-        vt_.assign((size_t)maxBlock * F, 0.0); vc_.assign((size_t)maxBlock * F, 0.0);
-        vtB_.assign(maxBlock, 0.0); vcB_.assign(maxBlock, 0.0);
+        inD_.assign(maxBlock, 0.0); upD_.assign((size_t)maxBlock * F, 0.0); in2D_.assign(maxBlock, 0.0); up2D_.assign((size_t)maxBlock * F, 0.0);
+        vt_.assign((size_t)maxBlock * F, 0.0); vc_.assign((size_t)maxBlock * F, 0.0); ic_.assign((size_t)maxBlock * F, 0.0);
+        vtB_.assign(maxBlock, 0.0); vcB_.assign(maxBlock, 0.0); icB_.assign(maxBlock, 0.0);
         build(p);
     }
 
@@ -102,7 +107,7 @@ public:
     void build(const EngineParams& p)
     {
         params_ = p;
-        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_);
+        os_.prepare(p.oversampleLog2, sr_); osCone_.prepare(p.oversampleLog2, sr_); osCur_.prepare(p.oversampleLog2, sr_); os2_.prepare(p.oversampleLog2, sr_);
         amp_.cfg = makeConfig(p);
         amp_.loadNetlist(netlist_);
         const double fsInt = sr_ * os_.factor();
@@ -119,7 +124,7 @@ public:
         applied_ = p;
         const int F = os_.factor();
         if ((size_t)maxBlock_ * F != upD_.size()) {
-            upD_.assign((size_t)maxBlock_ * F, 0.0); vt_.assign((size_t)maxBlock_ * F, 0.0); vc_.assign((size_t)maxBlock_ * F, 0.0);
+            upD_.assign((size_t)maxBlock_ * F, 0.0); vt_.assign((size_t)maxBlock_ * F, 0.0); vc_.assign((size_t)maxBlock_ * F, 0.0); ic_.assign((size_t)maxBlock_ * F, 0.0); up2D_.assign((size_t)maxBlock_ * F, 0.0);
         }
     }
 
@@ -158,6 +163,11 @@ public:
     // Last process() block at the host rate (first n entries): cone velocity [m/s] for the hybrid acoustic route (dossier
     // Sec. 27), and the output scale kOut that maps terminal volts to output units (identical to the one process() applies).
     const std::vector<double>& coneVelocityBlock() const { return vcB_; }
+    // Speaker-terminal CURRENT [A] of the last process() block at the host rate (dossier Sec. 05/25/31: expose terminal voltage AND current).
+    // Total current into the load at the terminals (voice coil + dummy + extension), decimated by its own resampler.  Off by default so the
+    // plugin pays nothing; the offline tools switch it on.  Same latency as the voltage output.
+    void setCaptureTerminalCurrent(bool on) { captureCurrent_ = on; }
+    const std::vector<double>& terminalCurrentBlock() const { return icB_; }
     double outputScale() const { return std::pow(10.0, (double)applied_.outputDb / 20.0) / (double)applied_.outputRefVolts; }
 
     EngineDiag diag() const
@@ -173,13 +183,17 @@ public:
 
     void reset()
     {
-        os_.reset(); osCone_.reset(); acoustic_.reset();
+        os_.reset(); osCone_.reset(); osCur_.reset(); os2_.reset(); acoustic_.reset();
         amp_.initialiseQuiescent(0.1);
         coilDeltaT_ = 0.0; amp_.setVoiceCoilResistance(params_.speakerHeating ? amp_.cfg.speaker.Re : amp_.cfg.speaker.Re);
     }
 
     // mono in -> terminal-referred output and provisional-acoustic output (both calibrated, n <= maxBlock)
-    void process(const float* in, float* outTerm, float* outAcoustic, int n)
+    void process(const float* in, float* outTerm, float* outAcoustic, int n) { process(in, nullptr, outTerm, outAcoustic, n); }
+
+    // Same, with a SECOND source (in2, may be null) feeding the second plug selected by EngineParams::jack2.  With jack2 == 0 in2 is ignored; with jack2 set and
+    // in2 null the plug is a cable terminated in the source impedance (a guitar at rest).  Both inputs are calibrated by the same K_in.
+    void process(const float* in, const float* in2, float* outTerm, float* outAcoustic, int n)
     {
         if (hasPending_) { applyPending(); hasPending_ = false; }
         const int F = os_.factor();
@@ -195,15 +209,27 @@ public:
             inD_[i] = x;
         }
         os_.up(inD_.data(), n, upD_.data());
+        const bool two = in2 != nullptr && applied_.jack2 >= 1;
+        if (two) {
+            for (int i = 0; i < n; ++i) {
+                double x = (double)in2[i];
+                if (!std::isfinite(x)) { x = 0.0; ++nonFinite_; }
+                x *= kIn;
+                if (x > kMaxJackVolts) { x = kMaxJackVolts; ++clamped_; } else if (x < -kMaxJackVolts) { x = -kMaxJackVolts; ++clamped_; }
+                in2D_[i] = x;
+            }
+            os2_.up(in2D_.data(), n, up2D_.data());
+        }
         const int N = n * F;
         const double hInt = 1.0 / (sr_ * F);
         coilInterval_ = (int64_t)(256) * F;           // fixed interval: output is independent of the host block size
         bool bad = false;
         for (int i = 0; i < N; ++i) {
             if ((ctr_++ & 63) == 0) { amp_.applyControls(false); }
-            amp_.tick(upD_[i]);
+            amp_.tick2(upD_[i], two ? up2D_[i] : 0.0);
             const double vt = amp_.vTerminal();
             vt_[i] = vt; vc_[i] = amp_.coneVelocity();
+            if (captureCurrent_) ic_[i] = amp_.terminalCurrent();
             const double ic = amp_.speakerCurrent();
             coilAcc_ += ic * ic * hInt; coilCnt_ += 1;
             if (coilCnt_ >= coilInterval_) stepThermal(hInt);
@@ -212,6 +238,7 @@ public:
         if (bad) { recover(); for (int i = 0; i < n; ++i) { outTerm[i] = 0.f; outAcoustic[i] = 0.f; } return; }
         os_.down(vt_.data(), n, vtB_.data());
         osCone_.down(vc_.data(), n, vcB_.data());       // separate decimator: filter history is per-signal
+        if (captureCurrent_) osCur_.down(ic_.data(), n, icB_.data());
         for (int i = 0; i < n; ++i) {
             outTerm[i] = (float)(kOut * vtB_[i]);
             outAcoustic[i] = (float)(kOut * acoustic_.process(vcB_[i]));
@@ -242,8 +269,9 @@ private:
         c.rectifier = p.rectifier == 0 ? RectifierType::Tube5Y3 : RectifierType::Silicon;
         c.pickupModel = p.sourceMode == 1;
         c.srcR = p.sourceR;
-        c.volumeMap.taper = p.taper == 0 ? PotTaper::Audio15 : (p.taper == 1 ? PotTaper::Audio10 : PotTaper::Linear);
-        c.toneMap.taper = PotTaper::Linear;
+        // a MEASURED map from the manifest wins over the plugin's assumed taper choice (dossier Sec. 08)
+        if (!c.volumeMapMeasured) c.volumeMap.taper = p.taper == 0 ? PotTaper::Audio15 : (p.taper == 1 ? PotTaper::Audio10 : PotTaper::Linear);
+        if (!c.toneMapMeasured) c.toneMap.taper = PotTaper::Linear;
         c.variationAmount = p.variation; c.variationSeed = (uint32_t)p.variationSeed;
         c.humCurrent = p.humDb > -150.0f ? 1e-6 * std::pow(10.0, (double)p.humDb / 20.0) : 0.0;
         c.noiseScale = p.noise; c.noiseSeed = (uint32_t)p.noiseSeed;
@@ -254,7 +282,7 @@ private:
     {
         AmpControls c;
         c.instVol = p.instVol; c.micVol = p.micVol; c.tone = p.tone;
-        c.guitarJack = p.jack; c.patch = p.patch; c.load = (LoadMode)p.load; c.power = p.power;
+        c.guitarJack = p.jack; c.guitarJack2 = p.jack2; c.patch = p.patch; c.load = (LoadMode)p.load; c.power = p.power;
         return c;
     }
     static AcousticParams makeAcoustic(const EngineParams& p)
@@ -301,7 +329,7 @@ private:
     void recover()
     {
         ++panics_;
-        os_.reset(); osCone_.reset(); acoustic_.reset();
+        os_.reset(); osCone_.reset(); osCur_.reset(); os2_.reset(); acoustic_.reset();
         amp_.initialiseQuiescent(0.1);
     }
 
@@ -312,9 +340,10 @@ private:
     EngineParams params_, applied_, pending_;
     bool hasPending_ = false;
     AmpCircuit amp_;
-    Oversampler os_, osCone_;
+    Oversampler os_, osCone_, osCur_, os2_;
     AcousticOperator acoustic_;
-    std::vector<double> inD_, upD_, vt_, vc_, vtB_, vcB_;
+    std::vector<double> inD_, upD_, vt_, vc_, vtB_, vcB_, ic_, icB_, in2D_, up2D_;
+    bool captureCurrent_ = false;
     uint64_t ctr_ = 0, panics_ = 0, nonFinite_ = 0, clamped_ = 0;
     double coilDeltaT_ = 0.0, coilAcc_ = 0.0; int64_t coilCnt_ = 0, coilInterval_ = 256;
     Network::Stats diagBase_;

@@ -16,7 +16,7 @@ set(CD57_JUCE_DIR "" CACHE PATH "Use an existing JUCE checkout instead of fetchi
 set(CD57_GEN ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${CD57_GEN})
 set(CD57_NETLIST ${CMAKE_CURRENT_SOURCE_DIR}/data/netlist/cd57_nominal.net)
-set(CD57_MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/data/parameters/cd57_nominal.json)
+set(CD57_MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/data/parameters/cd57_nominal.json CACHE FILEPATH "Parameter manifest embedded in the build (use a specimen manifest produced by cd57_manifest merge for a measured-specimen build)")
 add_custom_command(OUTPUT ${CD57_GEN}/EmbeddedNetlist.cpp
     COMMAND ${CMAKE_COMMAND} -DINPUT=${CD57_NETLIST} -DOUTPUT=${CD57_GEN}/EmbeddedNetlist.cpp -DFUNC=embeddedNetlist
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedText.cmake
@@ -31,6 +31,8 @@ target_include_directories(cd57_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dsp 
 target_compile_features(cd57_core PUBLIC cxx_std_17)
 set_target_properties(cd57_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
+    # MSVC declares M_PI only with _USE_MATH_DEFINES; the DSP headers and the plugin use it (this was the whole Windows build failure on main)
+    target_compile_definitions(cd57_core PUBLIC _USE_MATH_DEFINES)
     target_compile_options(cd57_core PUBLIC /fp:precise /EHsc)
 else()
     target_compile_options(cd57_core PUBLIC -fno-math-errno)
@@ -48,6 +50,7 @@ if(CD57_BUILD_TOOLS)
     add_custom_target(regen_lu_kernel COMMAND cd57_gen_lu ${CD57_NETLIST} ${CMAKE_CURRENT_SOURCE_DIR}/generated/LuKernel.h
         DEPENDS cd57_gen_lu COMMENT "Regenerating generated/LuKernel.h" VERBATIM)
     enable_testing()
+    find_package(Threads REQUIRED)
     add_test(NAME dossier_validation COMMAND cd57_validate --quick --report ${CMAKE_CURRENT_BINARY_DIR}/validation_quick.md)
     # --- netlist register tests ---
     find_program(CD57_PYTHON NAMES python3 python)
@@ -89,9 +92,51 @@ if(CD57_BUILD_TOOLS)
     add_executable(validate_acoustic tools/validate_acoustic.cpp)
     target_link_libraries(validate_acoustic PRIVATE cd57_core)
     add_test(NAME acoustic_validation COMMAND validate_acoustic)
+    # --- Sec. 26 metric library: self-test against analytic answers ---
+    add_library(cd57_analysis INTERFACE)
+    target_include_directories(cd57_analysis INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/analysis)
+    target_compile_features(cd57_analysis INTERFACE cxx_std_17)
+    add_executable(validate_metrics tools/validate_metrics.cpp)
+    target_link_libraries(validate_metrics PRIVATE cd57_analysis)
+    add_test(NAME metrics_selftest COMMAND validate_metrics)
+    # --- capture programme (Sec. 25): render the capture matrix through the model; the same harness scores a hardware dataset ---
+    add_executable(cd57_capture_matrix tools/cd57_capture_matrix.cpp)
+    target_include_directories(cd57_capture_matrix PRIVATE tools)
+    target_link_libraries(cd57_capture_matrix PRIVATE cd57_core cd57_analysis Threads::Threads)
+    add_executable(cd57_conduction tools/cd57_conduction.cpp)
+    target_include_directories(cd57_conduction PRIVATE tools)
+    target_link_libraries(cd57_conduction PRIVATE cd57_core cd57_analysis)
+    add_test(NAME valve_conduction_consistency COMMAND cd57_conduction --report ${CMAKE_CURRENT_BINARY_DIR}/conduction.md)
+    add_executable(cd57_sensitivity tools/cd57_sensitivity.cpp)
+    target_include_directories(cd57_sensitivity PRIVATE tools)
+    target_link_libraries(cd57_sensitivity PRIVATE cd57_core cd57_analysis Threads::Threads)
+    add_test(NAME sensitivity_quick COMMAND cd57_sensitivity --quick --threads 2 --report ${CMAKE_CURRENT_BINARY_DIR}/sensitivity_quick.md)
+    add_executable(cd57_diagnostics tools/cd57_diagnostics.cpp)
+    target_include_directories(cd57_diagnostics PRIVATE tools)
+    target_link_libraries(cd57_diagnostics PRIVATE cd57_core cd57_analysis)
+    add_executable(validate_jacks tools/validate_jacks.cpp)
+    target_include_directories(validate_jacks PRIVATE tools)
+    target_link_libraries(validate_jacks PRIVATE cd57_core cd57_analysis)
+    add_test(NAME jack_states_two_plugs COMMAND validate_jacks)
+    add_executable(validate_manifest tools/validate_manifest.cpp)
+    target_link_libraries(validate_manifest PRIVATE cd57_core)
+    target_compile_definitions(validate_manifest PRIVATE CD57_PARAM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data/parameters")
+    add_test(NAME manifest_provenance_and_specimen_delta COMMAND validate_manifest)
+    add_executable(cd57_manifest tools/cd57_manifest.cpp)
+    target_link_libraries(cd57_manifest PRIVATE cd57_core)
+    add_executable(cd57_compare tools/cd57_compare.cpp)
+    target_include_directories(cd57_compare PRIVATE tools src/dsp)
+    target_link_libraries(cd57_compare PRIVATE cd57_core cd57_analysis)
+    if(CD57_PYTHON)
+        add_test(NAME capture_compare_selfcheck
+                 COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_compare.py --capture $<TARGET_FILE:cd57_capture_matrix>
+                         --compare $<TARGET_FILE:cd57_compare> --tmp ${CMAKE_CURRENT_BINARY_DIR}/compare_selfcheck)
+        add_test(NAME capture_matrix_quick
+                 COMMAND ${CD57_PYTHON} -I ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_capture_matrix.py --exe $<TARGET_FILE:cd57_capture_matrix>
+                         --tmp ${CMAKE_CURRENT_BINARY_DIR}/capture_quick)
+    endif()
     # --- numerics tests ---
     add_executable(validate_numerics tools/validate_numerics.cpp)
-    find_package(Threads REQUIRED)
     target_link_libraries(validate_numerics PRIVATE cd57_core Threads::Threads)
     add_test(NAME numerics_validation COMMAND validate_numerics --quick --report ${CMAKE_CURRENT_BINARY_DIR}/numerics_quick.md)
 endif()
@@ -130,7 +175,8 @@ if(CD57_BUILD_PLUGIN)
     # host test: loads the built VST3 through JUCE's VST3 host (no external tools needed)
     juce_add_console_app(cd57_host_test PRODUCT_NAME "cd57_host_test")
     target_sources(cd57_host_test PRIVATE tests/PluginHostTest.cpp)
-    target_compile_definitions(cd57_host_test PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_compile_definitions(cd57_host_test PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_MODAL_LOOPS_PERMITTED=1
+                               $<$<CXX_COMPILER_ID:MSVC>:_USE_MATH_DEFINES>)   # this target does not link cd57_core, which carries the define for MSVC
     target_link_libraries(cd57_host_test PRIVATE juce::juce_audio_processors juce::juce_audio_utils juce::juce_recommended_config_flags)
     add_dependencies(cd57_host_test CustomDeluxe57_VST3)
 

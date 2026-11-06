@@ -1,0 +1,154 @@
+{
+ "schema": "cd57-specimen-delta-v1",
+ "delta_of_profile": "provisional_public_source_nominal",
+ "branch": "specimen",
+ "how_to_use": "Fill in 'measured' for the parameters you measured, leave the others null (null changes nothing), fill the 'specimen' block, then: cd57_manifest merge data/parameters/cd57_nominal.json YOUR_DELTA.json merged.json  and render with --manifest merged.json (cd57_capture_matrix, cd57_render) or build the plugin with -DCD57_MANIFEST=merged.json. Every measured block needs value, unit (the entry's unit), instrument and date; record the instrument range and lead compensation (Sec. 04). Nominal values stay in the file beside the measured ones.",
+ "specimen": {
+  "serial": null,
+  "revision": null,
+  "market": null,
+  "tube_markings": null,
+  "speaker_label": null,
+  "photo_ids": []
+ },
+ "parameters": {
+  "pt_hv_half_winding_rms": {
+   "hint": "AC RMS of ONE half of the high-voltage secondary (centre tap to one anode), unloaded or at stated load; record mains volts and Hz (Sec. 11, 12, 25)",
+   "unit": "V",
+   "nominal": 377.4,
+   "measured": null
+  },
+  "pt_series_resistance_per_half": {
+   "hint": "DC resistance of one HV half-winding plus the reflected primary resistance (Sec. 12)",
+   "unit": "ohm",
+   "nominal": 90.0,
+   "measured": null
+  },
+  "ot_turns_ratio_full_primary": {
+   "hint": "full-primary : secondary turns ratio from a low-level voltage ratio with the other windings open (Sec. 12)",
+   "unit": "ratio",
+   "nominal": 31.6227766,
+   "measured": null
+  },
+  "ot_primary_inductance_full": {
+   "hint": "small-signal inductance of the full primary, secondary open, at a stated frequency and level (Sec. 12)",
+   "unit": "H",
+   "nominal": 25.5,
+   "measured": null
+  },
+  "ot_leakage_inductance_full_ref": {
+   "hint": "leakage inductance referred to the full primary, secondary shorted (Sec. 12)",
+   "unit": "H",
+   "nominal": 0.04,
+   "measured": null
+  },
+  "ot_dcr_primary_half": {
+   "hint": "DC resistance of one primary half (Sec. 12)",
+   "unit": "ohm",
+   "nominal": 125.0,
+   "measured": null
+  },
+  "ot_dcr_secondary": {
+   "hint": "DC resistance of the secondary (Sec. 12)",
+   "unit": "ohm",
+   "nominal": 0.35,
+   "measured": null
+  },
+  "ot_core_saturation_flux_per_secondary_turn": {
+   "hint": "ONLY if a saturation measurement exists (Sec. 12, 29: do not assign a law before evidence); switch the option on to use it",
+   "unit": "V*s",
+   "nominal": 0.06,
+   "measured": null
+  },
+  "pot_total_resistance": {
+   "hint": "end-to-end resistance of the volume/tone pots (Sec. 08)",
+   "unit": "ohm",
+   "nominal": 1000000.0,
+   "measured": null
+  },
+  "pot_endpoint_contact_resistance": {
+   "hint": "wiper resistance at the grounded end stop (Sec. 08)",
+   "unit": "ohm",
+   "nominal": 20.0,
+   "measured": null
+  },
+  "speaker_Re": {
+   "hint": "voice-coil DC resistance, cold (Sec. 17)",
+   "unit": "ohm",
+   "nominal": 6.4,
+   "measured": null
+  },
+  "speaker_Le": {
+   "hint": "voice-coil inductance from the complex impedance fit (Sec. 17)",
+   "unit": "H",
+   "nominal": 0.0007,
+   "measured": null
+  },
+  "speaker_fs": {
+   "hint": "free-air resonance (Sec. 17)",
+   "unit": "Hz",
+   "nominal": 98.0,
+   "measured": null
+  },
+  "speaker_Qms": {
+   "hint": "mechanical Q (Sec. 17)",
+   "unit": "-",
+   "nominal": 5.5,
+   "measured": null
+  },
+  "speaker_Qes": {
+   "hint": "electrical Q (Sec. 17)",
+   "unit": "-",
+   "nominal": 1.0,
+   "measured": null
+  },
+  "speaker_Mms": {
+   "hint": "moving mass (sets acoustic sensitivity only; no electrical effect when fs, Qms, Qes are given)",
+   "unit": "kg",
+   "nominal": 0.0195,
+   "measured": null
+  },
+  "speaker_Sd": {
+   "hint": "effective piston area",
+   "unit": "m^2",
+   "nominal": 0.05,
+   "measured": null
+  },
+  "speaker_voice_coil_tempco": {
+   "hint": "only if the conductor is verified (Sec. 18)",
+   "unit": "1/K",
+   "nominal": 0.00393,
+   "measured": null
+  },
+  "speaker_thermal_Cth": {
+   "hint": "warming/cooling fit (Sec. 18)",
+   "unit": "J/K",
+   "nominal": 8.0,
+   "measured": null
+  },
+  "speaker_thermal_Rth": {
+   "hint": "warming/cooling fit (Sec. 18)",
+   "unit": "K/W",
+   "nominal": 6.0,
+   "measured": null
+  },
+  "volume_pot_taper_instrument": {
+   "hint": "11 alpha values at knob 0, 0.1, ..., 1.0 (Sec. 08)",
+   "unit": "fraction_vs_angle_11pt",
+   "nominal": null,
+   "measured": null
+  },
+  "volume_pot_taper_mic": {
+   "hint": "11 alpha values at knob 0, 0.1, ..., 1.0 (Sec. 08)",
+   "unit": "fraction_vs_angle_11pt",
+   "nominal": null,
+   "measured": null
+  },
+  "tone_pot_taper": {
+   "hint": "11 alpha values at knob 0, 0.1, ..., 1.0, from the 5 nF end (Sec. 08)",
+   "unit": "fraction_vs_angle_11pt",
+   "nominal": null,
+   "measured": null
+  }
+ }
+}

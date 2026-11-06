@@ -16,7 +16,7 @@ interacting nonlinear electrical system (modified nodal analysis) — not as a c
 
 | Dossier subsystem | Implementation |
 |---|---|
-| Jack network, plug states (§06) | Four explicit jack sockets with switching jacks, guitar plug selectable per jack, optional **jumper cable** between any two jacks. The 1 MΩ / 136 kΩ input impedances and the −6 dB of input 2 are **reproduced by the circuit** (not fitted). |
+| Jack network, plug states (§06) | Four explicit jack sockets with switching jacks, guitar plug selectable per jack, a **second plug** (a second guitar on the right input channel, or a cable terminated in the source impedance) in any other jack, optional **jumper cable** between any two jacks. The 1 MΩ / 136 kΩ input impedances and the −6 dB of input 2 are **reproduced by the circuit** (not fitted); with a terminated plug in the other jack of a channel the circuit gives −6.02 dB and 119.7 kΩ (1 MΩ ‖ 136 kΩ), as the drawing's 68 kΩ network predicts (`validate_jacks`). |
 | First stage (§07) | 12AY7 pair with **shared cathode** (820 Ω ∥ 25 µF) so the channels couple through cathode voltage; electrode capacitances between real nodes. |
 | Volumes + tone (§08) | Coupled passive network: two volume pots (wiper fed from the plate coupling caps), tone pot with the 500 pF bright path and 5 nF shunt, the **silent channel still loads the driven one**. Pots are two resistances joined at the wiper with a documented endpoint contact resistance. Taper numerics are unknown → assumed and selectable. |
 | Gain stage + cathodyne (§09) | 12AX7 stage and bootstrapped cathodyne (1 MΩ returns to the 1.5 kΩ / 56 kΩ junction), coupling-capacitor charge state. |
@@ -59,9 +59,10 @@ GitHub Actions (`.github/workflows/build.yml`) builds all three platforms and ru
 
 ## Using it
 
-* **Input:** the plugin takes a mono guitar signal. *Input channel* chooses the mean of L and R (a dual-mono source stays at its calibrated level), left only or right only.
+* **Input:** the plugin takes a mono guitar signal (plus an optional second plug, below). *Input channel* chooses the mean of L and R (a dual-mono source stays at its calibrated level), left only or right only.
   *Input Calibration* sets the volts at the jack for a 0 dBFS sample (default 1.0 V peak; with *Input trim* ±12 dB the jack never sees more than 20 V): the dossier stresses that this must be calibrated to your interface — it is a control, not a Fender number.
 * **Panel:** Instrument Volume, Mic Volume, Tone (printed 0–12 scale — an assumption), power switch, four jacks laid out as photographed (MIC | INST, rows 1 and 2; click to plug the guitar in), jumper cable, pilot jewel.
+* **Second plug** (lab area): *Second plug* puts a second cable in another jack (a jack holds one plug; the same jack as the guitar is ignored); *Second plug source* is either a **terminated cable** (a guitar at rest: the plug, its switching and its source impedance are in the circuit, the signal is not) or the **right input channel** (a second guitar; the first source is then the left channel alone). This reproduces the §06 rows "both jacks of one channel" and "one input per channel".
 * **Output:** *Microphone (provisional model)* · *Speaker terminals* (calibrated volts, 0 dBFS = 28.28 V peak, rated 12.5 W sine = −6 dBFS) · *User IR* (voltage→mic capture, route 1) · *User IR on cone motion (hybrid)* (route 2).
 * **Service panel** shows live rail voltages (B+1/2/3), 6V6 cathode voltage, voice-coil heating, solver iterations/fallbacks and CPU.
 * **Lab controls:** market variant (50/60 Hz and nominal volts from the manual's table), line voltage %, V1/V2 tube swap, silicon rectifier, source model (line/DI or passive pickup + cable), volume taper, output-transformer saturation option, oversampling, specimen-variation seed, hum and noise (seeded; the noise-free circuit stays independently testable).
@@ -73,7 +74,7 @@ GitHub Actions (`.github/workflows/build.yml`) builds all three platforms and ru
 
 ## Validation
 
-`ctest --test-dir build` runs ten tests (grouped into nine rows below); each reports PASS / FAIL against a criterion fixed in advance, and INFO for numbers that are only recorded.
+`ctest --test-dir build` runs 17 tests (16 without the plugin; grouped into rows below); each reports PASS / FAIL against a criterion fixed in advance, and INFO for numbers that are only recorded.
 
 | Suite | What it establishes | Report |
 |---|---|---|
@@ -85,21 +86,34 @@ GitHub Actions (`.github/workflows/build.yml`) builds all three platforms and ru
 | `numerics_validation` | aliasing and integration error vs a 16× reference, resampler specification, step-size convergence, assembled Jacobian, KCL along a transient, charge conservation, **whole-amplifier energy balance (0.000 %)** | `docs/NUMERICS_REPORT.md` |
 | `realtime_robustness` | zero heap allocation (operator new counted) in steady state and across every control/config change, NaN/Inf and over-range input, Newton acceptance, load modes, linear OT default, state transfer, per-block timing | `tools/validate_realtime.cpp` |
 | `acoustic_validation` | the Sec. 27 linear-acoustic identity (route 1 vs route 2) with a **synthetic** H, IR gain/polarity/arrival time, resampling, dipole algebra | `tools/validate_acoustic.cpp` |
-| `plugin_processor` | the built plugin's processor driven directly: reported latency, input-channel choice, acoustic modes and IR state, hybrid vs route 1, continuity across an oversampling swap | `tests/ProcessorTest.cpp` |
+| `plugin_processor` | the built plugin's processor driven directly: reported latency, input-channel choice, the second plug (a right-channel signal reaches the amplifier only through a driven second plug), acoustic modes and IR state, hybrid vs route 1, continuity across an oversampling swap | `tests/ProcessorTest.cpp` |
+| `metrics_selftest` | the dossier §26 metrics (NRMSE / ESR, fixed-delay estimate, sweep response / phase / group delay, Farina harmonic orders, harmonics, two onset definitions, IMD, burst envelope and recovery) against **analytic answers** — 34 checks | `src/analysis/Metrics.h`, `tools/validate_metrics.cpp` |
+| `jack_states_two_plugs` | the four-jack, two-plug model against closed-form predictions of the drawing's grid network (−6.02 dB, 119.7 kΩ, no change from a plug in the other channel, linear superposition of two driven plugs, collision rules) | `tools/validate_jacks.cpp` |
+| `manifest_provenance_and_specimen_delta` | schema-2 provenance on every parameter; the all-null specimen template changes nothing (bit-identical render); a measured value sits beside the nominal one; every refusal (unknown key, unit mismatch, no instrument, no date, other base profile, bad branch); measured pot maps override the assumed taper per pot | `tools/validate_manifest.cpp` |
+| `capture_matrix_quick` / `capture_compare_selfcheck` | the §25 capture programme renders, its §30 metadata validates against the schema and reproduces the committed reference; the §26 comparison scores identical renders as exactly zero, **fails** a perturbed model, and passes 1x vs 2x oversampling | `scripts/check_capture_matrix.py`, `scripts/check_compare.py` |
+| `valve_conduction_consistency` / `sensitivity_quick` | the per-valve current report is consistent with the circuit (mean cathode current x 250 Ω = mean cathode voltage at every drive level); the sensitivity study's direction, isolation and degenerate-range self-checks | `tools/cd57_conduction.cpp`, `tools/cd57_sensitivity.cpp` |
 
 Also: `cd57_host_test` loads the built VST3 through JUCE's VST3 host (`xvfb-run` on Linux); `cd57_render` is an offline WAV→WAV renderer.
+
+**Measurement harness (dossier §24–26, 30).** `cd57_capture_matrix` renders the §25 capture programme (4 inputs × 27 knob combinations × clean / onset / driven = 324 captures, + 72 endpoint, 33 jack-state, 36 held-out) with the §30 minimum capture
+metadata; `cd57_compare` scores any two capture directories — the model against a hardware recording of the same programme, or against itself — with the §26 metrics and limits; `cd57_manifest` validates and merges specimen deltas;
+`cd57_conduction`, `cd57_sensitivity` and `cd57_diagnostics` produce the per-valve conduction report, the §13 sensitivity ranking and the §26 diagnostic views (`docs/CONDUCTION_REPORT.md`, `docs/SENSITIVITY_REPORT.md`,
+`docs/DIAGNOSTICS.md`, `docs/figures/`). The route from this approximation to a measured match, step by step: **`docs/HARDWARE_ROUTE.md`**.
 
 **Not evaluated (needs reference hardware):** magnitude/phase/harmonic/IMD/recovery agreement with a real unit, speaker impedance and nonlinear isolation, microphone chain,
 blind listening, the capture programme. The 12.5 W / <5 % THD figure is a **calibration** of the unknown power-transformer voltage, not independent evidence; the validation
 report publishes how weakly it constrains that value. The dossier's −80 dBFS alias candidate limit is met for a heavy six-note chord at 2× but not for a heavy single
-3.1 kHz tone below 8× (solver truncation dominates); see `docs/NUMERICS_REPORT.md`.
+3.1 kHz tone below 8× (solver truncation dominates; `docs/NUMERICS_REPORT.md` section F shows that tightening the Newton tolerances 10⁴× changes that residual by 0.06 dB, i.e. it is time-step truncation, so only smaller steps or a more accurate integrator would lower it).
 
 ## Provenance and how to refine the model
 
 * `data/netlist/cd57_nominal.net` — readable, versioned netlist; each element has an evidence tag (`CONF`/`HIST`/`ASSUMED`/`DATASHEET`/`PROP`) and source id. `data/netlist/schematic_register.json` is the independent transcription it is checked against.
-* `data/parameters/cd57_nominal.json` — the §30 manifest (56 entries; the loader refuses entries without a status, or an assumed value without an interval, and fails on a missing requested key). Only 14 entries drive the model; the rest document values that live elsewhere (listed in the validation report).
+* `data/parameters/cd57_nominal.json` — the §30 manifest (59 entries, schema 2: every entry carries status, branch, source revision, serial range and uncertainty; the loader refuses entries without them, an assumed value without an interval, and fails on a missing requested key). 20 entries drive the model (including the output transformer and the pot maps); the rest document values that live elsewhere (listed in the validation report).
+* `data/parameters/specimen_delta_template.json` + `cd57_manifest merge` — measurements enter as a **versioned specimen delta** merged *beside* the nominal values (never replacing them), with unit, instrument and date mandatory and every refusal tested; measured pot maps replace the assumed taper per pot.
+* `data/capture/capture_metadata.schema.json`, `data/calibration/`, `data/reference/` — the §30 capture-metadata schema, the model's boundary calibration and a hardware calibration template, and the committed regression references (capture matrix, conduction, sensitivity).
+* `docs/SOURCE_CATALOGUE.md` — the 32 sources of the dossier: what each is used for, whether this implementation could read it (only the dossier itself and its embedded figures), and where it enters the repository.
 * `data/tubes/digitized/` + `scripts/` — the digitised JJ sheets with overlay images, the digitiser, the fitter and `generated/TubeFits.h`. Re-run: `python3 scripts/digitize_jj_sheets.py && python3 scripts/fit_tubes.py && python3 scripts/make_manifest.py`.
-* To adopt measurements: edit values in the netlist/manifest (keep the evidence label), re-run `scripts/make_manifest.py`, re-calibrate the power-transformer value with `cd57_validate --calibrate-pt`, run the suites.
+* To adopt measurements: write a specimen delta (`data/parameters/specimen_delta_template.json`), `cd57_manifest merge`, render with `--manifest merged.json` or build with `-DCD57_MANIFEST=merged.json`, re-calibrate the power-transformer value only if you did not measure it (`cd57_validate --calibrate-pt`), run the suites. For structural changes edit the netlist and `scripts/make_manifest.py` (keep the evidence label).
   After changing the netlist **topology**, run `cmake --build build --target regen_lu_kernel` (a pattern-signature check falls back to the generic solver if you forget — slower, never wrong).
 
 ## Limitations (please read)
@@ -110,7 +124,7 @@ report publishes how weakly it constrains that value. The dossier's −80 dBFS a
 * The dossier's cited primary sources (owner's manual, the earlier service drawing, RCA/other datasheets, the Mercury transformer sheet, Koren, ...) could not be fetched from the build environment (outbound access to those hosts is denied). Only the dossier's own text and embedded figures were used. The earlier service drawing's test-point voltages, the RCA 6V6/5Y3 curves and the manual's speaker-jack rules would each tighten the model if they were supplied.
 * Acoustic output is a physics-based **provisional** operator, not PN 7708599000 in its cabinet; load a measured voltage→mic IR for a specific sound. The 5.2 kHz cone roll-off may overlap what the voice-coil inductance already does; that cannot be decided without data.
 * Large-signal speaker nonlinearity (Bl(x), Kms(x)) is not modelled (no data); the heater warm-up/standby is not simulated at plugin start (the engine starts at a solved quiescent state, as the dossier recommends); the power switch ramps the supply.
-* Mono processing; Windows/macOS builds are CI-only and untested here. Latency changes of the hosted VST3 reach a host through the host's own latency-change mechanism.
+* Mono output (one amplifier, one speaker-terminal signal; at most two input sources); Windows/macOS builds are CI-only and untested here. Latency changes of the hosted VST3 reach a host through the host's own latency-change mechanism.
 
 ## Licensing and trademarks
 

@@ -19,6 +19,9 @@
 #include <new>
 #include <string>
 #include <vector>
+#ifdef _MSC_VER
+#include <malloc.h>
+#endif
 
 #include "CD57Engine.h"
 #include "EmbeddedData.h"
@@ -33,19 +36,26 @@ void* operator new(std::size_t n)
     throw std::bad_alloc();
 }
 void* operator new[](std::size_t n) { return operator new(n); }
+// aligned allocation is platform specific: posix_memalign + free on POSIX, _aligned_malloc + _aligned_free on MSVC (the CRT requires the pair)
+#ifdef _MSC_VER
+static void* alignedAlloc(std::size_t n, std::size_t a) { return _aligned_malloc(n ? n : 1, a); }
+static void alignedFree(void* p) { _aligned_free(p); }
+#else
+static void* alignedAlloc(std::size_t n, std::size_t a) { void* p = nullptr; return posix_memalign(&p, std::max<std::size_t>(a, sizeof(void*)), n ? n : 1) == 0 ? p : nullptr; }
+static void alignedFree(void* p) { std::free(p); }
+#endif
 void* operator new(std::size_t n, std::align_val_t a)
 {
     if (gCount.load(std::memory_order_relaxed)) gAllocs.fetch_add(1, std::memory_order_relaxed);
-    void* p = nullptr;
-    if (posix_memalign(&p, std::max<std::size_t>((std::size_t)a, sizeof(void*)), n ? n : 1) != 0) throw std::bad_alloc();
-    return p;
+    if (void* p = alignedAlloc(n, (std::size_t)a)) return p;
+    throw std::bad_alloc();
 }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
-void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::align_val_t) noexcept { alignedFree(p); }
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept { alignedFree(p); }
 
 using namespace cd57;
 
@@ -74,6 +84,15 @@ struct Rig {
     {
         e.prepare(rate, block, embeddedNetlist(), p, embeddedManifest());
     }
+    std::vector<float> in2;
+    // like run(), but a SECOND source (1.3 kHz, peak amp2) drives the second plug (EngineParams::jack2)
+    void run2(double amp, double amp2, long& t0)
+    {
+        if (in2.size() != in.size()) in2.assign(in.size(), 0.f);
+        for (size_t i = 0; i < in.size(); ++i) { in[i] = (float)(amp * std::sin(2 * M_PI * 1000.0 * (double)(t0 + (long)i) / sr)); in2[i] = (float)(amp2 * std::sin(2 * M_PI * 1300.0 * (double)(t0 + (long)i) / sr)); }
+        t0 += (long)in.size();
+        e.process(in.data(), in2.data(), ot.data(), oa.data(), (int)in.size());
+    }
     // one block of a 1 kHz sine of peak 'amp' (digital) starting at phase index t0
     void run(double amp, long& t0, double f0 = 1000.0)
     {
@@ -98,6 +117,17 @@ void allocations()
         const auto d = r.e.diag();
         check(gAllocs.load() == 0, "steady state, heavy drive, " + std::to_string(1 << os) + "x oversampling: 0 allocations in 200 blocks", std::to_string(gAllocs.load()) + " allocations, " + std::to_string(d.substepped) + " sub-stepped steps in the run");
     }
+    for (int os : {0, 1, 2}) {   // the SECOND input path (second plug driven by its own signal) allocates nothing either
+        EngineParams p = base(); p.oversampleLog2 = os; p.jack2 = 3;
+        Rig r(p);
+        long t0 = 0;
+        for (int i = 0; i < 60; ++i) r.run2(0.5, 0.4, t0);
+        gAllocs = 0; gCount = true;
+        for (int i = 0; i < 200; ++i) r.run2(0.5, 0.4, t0);
+        gCount = false;
+        const auto d = r.e.diag();
+        check(gAllocs.load() == 0, "second plug driven by its own signal, heavy drive, " + std::to_string(1 << os) + "x oversampling: 0 allocations in 200 blocks", std::to_string(gAllocs.load()) + " allocations, " + std::to_string(d.substepped) + " sub-stepped steps, " + std::to_string(d.failures) + " unrecovered");
+    }
     {   // every kind of control / configuration change, applied between blocks
         EngineParams p = base();
         Rig r(p);
@@ -110,6 +140,7 @@ void allocations()
             {"tone", [](EngineParams& q, int k) { q.tone = 0.1f * (float)(k % 10); }},
             {"jack", [](EngineParams& q, int k) { q.jack = 1 + (k % 4); }},
             {"patch cable", [](EngineParams& q, int k) { q.patch = k % 7; }},
+            {"second plug", [](EngineParams& q, int k) { q.jack2 = k % 5; }},
             {"speaker load", [](EngineParams& q, int k) { q.load = k % 5; }},
             {"power switch", [](EngineParams& q, int k) { q.power = (k % 2) == 0; }},
             {"market variant (50/60 Hz, nominal volts)", [](EngineParams& q, int k) { q.market = k % kMarketCount; }},

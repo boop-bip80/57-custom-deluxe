@@ -74,7 +74,7 @@ Half-band Kaiser cascade; stage 0 (host rate to 2x) is designed for the host rat
 
 Reference: the same model, solver at 16 x the host rate, analytic input, offline. Candidates: the production chain at 1/2/4/8 x. Metric: residual (candidate minus reference) band-limited to 0-20 kHz, in dBFS (0 dBFS = full-scale sine; product default full scale 28.28 V peak, so the rated 12.5 W sine is -6 dBFS; a 20 V full scale would read 3.0 dB higher) and as ESR. Alignment: only the documented, exact up-/down-sampler delays are removed; the supply modulation has identical phase in both runs (see the header comment of this section's code). DC is removed from both signals (the DC difference is listed separately); everything else, including linear gain/phase error of the resampler passbands and the solver's slow-state error, stays in the residual, so the figure is a conservative bound on aliasing. Load: 8 ohm dummy (resistive bench boundary); Instrument vol 0.5, tone 0.7. Each cell: residual dBFS (ESR dB).
 
-- INFO — 116 reference comparisons in 102 s (4 threads)
+- INFO — 116 reference comparisons in 67 s (4 threads)
 
 **Host rate 48.0 kHz** — total error of the production chain vs the 16x reference (residual dBFS (ESR dB)); reference output level in the last column.
 
@@ -288,7 +288,7 @@ Integration method per element class (theta = 0.5 trapezoidal, 1 backward Euler)
 ## E. Solver self-checks (dossier Sec. 21: KCL residuals, DC equilibrium, capacitor charge, power flow; Sec. 31: verified Jacobian)
 
 - **PASS** — assembled system Jacobian matches central finite differences at heavy-drive states and control extremes (4 control sets x 8 states)  
-  worst relative error 24.2 e-6 at nominal, row 29 col 27
+  worst relative error 27.9 e-6 at all knobs at full, row 30 col 26
 - **PASS** — heavy-drive transient (250 mV at the jack, speaker load): nodal KCL residual stays below the acceptance threshold at every accepted step  
   max residual 0.90 uA (threshold 20 uA), 76800 steps, 67 sub-stepped, 0 unrecovered
 - **PASS** — failure counters are consistent: every unrecovered step is attributed to an unknown in the failure histogram  
@@ -298,5 +298,20 @@ Integration method per element class (theta = 0.5 trapezoidal, 1 backward Euler)
 - **PASS** — whole amplifier, heavy-drive burst: energy delivered by the sources = energy dissipated (resistors, valves, rectifier, winding loss) + change in stored energy (capacitors, inductors, transformer flux)  
   sources 1867.522 J, dissipated 1867.784 J, stored change -0.2624 J, imbalance 0.000 % of the source energy (peak speaker voltage 14.5 V)
 
+## F. The Newton tolerance is not what limits the accuracy (dossier Sec. 21)
+
+Section D shows the error of the heavy-drive tone falling as a power of the step size, which is the signature of time-step truncation; this section tests the alternative explanation directly. The solver's convergence tolerances (step tolerance in volts, relative tolerance, nodal KCL residual in amperes) are tightened by a factor of 10^4 and the residual against a much finer run is compared with the production tolerances. If convergence limited the accuracy the residual would fall; if it is truncation of the integration it does not move. 3.1 kHz tone, 60 mV peak at the jack, 8 ohm dummy load.
+
+| solver rate | tolerances | residual vs 32x, dBFS | Newton it/step | sub-stepped |
+|---|---|---|---|---|
+| 2x | production | -54.3 | 4.96 | 4.20 % |
+| 2x | tightened 10^4 x | -54.3 | 6.06 | 4.28 % |
+| 8x | production | -74.6 | 2.25 | 0.19 % |
+| 8x | tightened 10^4 x | -74.7 | 3.29 | 0.21 % |
+
+- **PASS** — tightening the Newton and KCL tolerances 10^4 x changes the heavy-drive residual by less than 1 dB at 2x and 8x: the residual is time-step truncation, not convergence  
+  largest change 0.06 dB
+- INFO — consequence: the only ways to lower the heavy-drive residual are smaller steps (more oversampling) or a more accurate integrator for the kinks of the device laws; neither more Newton iterations nor tighter tolerances help
+
 ---
-**Summary: 19 passed, 0 failed** (173.6 s)
+**Summary: 20 passed, 0 failed** (108.1 s)

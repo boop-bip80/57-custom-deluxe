@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "cd57-capture-v1",
+  "title": "Minimum capture metadata (dossier Sec. 30) for one capture of the Sec. 25 programme",
+  "description": "One JSON file per recording. Raw recordings (WAV) and processed results are stored SEPARATELY (Sec. 30): this file describes the raw capture; the processed metrics live in processed/<id>.json. A null means 'not recorded' and is intentional (Sec. 28: null/unknown, never an invented number). A hardware capture fills the nulls the model render cannot know: specimen serial, tube markings, speaker label, knob angles, ADC/DAC model and gain, output attenuation, microphone pose, ambient condition.",
+  "type": "object",
+  "required": ["schema", "id", "set", "synthetic", "specimen", "datetime_utc", "mains", "warmup", "source_impedance_ohm", "jack_state", "knobs",
+               "stimulus", "calibration", "adc_dac", "sample_rate_hz", "microphone_pose", "thermal_state", "ambient", "operator_notes", "model", "files"],
+  "properties": {
+    "schema": {"type": "string", "enum": ["cd57-capture-v1"]},
+    "id": {"type": "string", "description": "unique capture ID, e.g. CM-I1-i6m2t6-onset"},
+    "set": {"type": "string", "enum": ["core", "endpoints", "jackstates", "heldout"]},
+    "synthetic": {"type": "boolean", "description": "true for a model render, false for a recording of a physical amplifier"},
+    "specimen": {
+      "type": "object",
+      "required": ["serial", "model", "source", "tube_markings", "speaker_label", "revision"],
+      "properties": {
+        "serial": {"type": ["string", "null"]}, "model": {"type": "string"}, "source": {"type": "string"},
+        "tube_markings": {"type": ["array", "string", "null"], "description": "COMPLETE markings of every installed tube (Sec. 02: do not infer from the family name)"},
+        "speaker_label": {"type": ["string", "null"]}, "revision": {"type": ["string", "null"]}
+      }
+    },
+    "datetime_utc": {"type": "string"},
+    "mains": {"type": "object", "required": ["volts", "hz"], "properties": {"volts": {"type": ["number", "null"]}, "hz": {"type": ["number", "null"]}, "line_percent": {"type": ["number", "null"]}}},
+    "warmup": {"type": "object", "required": ["state", "seconds"], "properties": {"state": {"type": "string"}, "seconds": {"type": ["number", "null"]}}},
+    "source_impedance_ohm": {"type": ["number", "null"]},
+    "source_model": {"type": "string"},
+    "jack_state": {"type": "object", "required": ["guitar_jack", "patch_cable", "speaker_load"],
+                   "properties": {"guitar_jack": {"type": "string", "enum": ["none", "I1", "I2", "M1", "M2"]}, "second_plug": {"type": "string", "enum": ["none", "I1", "I2", "M1", "M2"]},
+                                  "second_plug_source": {"type": "string"}, "patch_cable": {"type": "string", "enum": ["none", "I1-I2", "M1-M2", "I1-M1", "I1-M2", "I2-M1", "I2-M2"]}, "speaker_load": {"type": "string"}}},
+    "knobs": {"type": "object", "required": ["instrument_volume_printed", "mic_volume_printed", "tone_printed", "knob_angle_deg", "pot_electrical_fraction", "pot_map_status"],
+              "properties": {"instrument_volume_printed": {"type": "number"}, "mic_volume_printed": {"type": "number"}, "tone_printed": {"type": "number"},
+                             "knob_angle_deg": {"type": ["object", "null"]}, "pot_electrical_fraction": {"type": ["object", "null"]}, "pot_map_status": {"type": "string"}}},
+    "stimulus": {"type": "object", "required": ["id", "hash_fnv1a_float32", "sample_rate_hz", "peak_volts_at_jack", "level", "segments"],
+                 "properties": {"id": {"type": "string"}, "hash_fnv1a_float32": {"type": "string"}, "sample_rate_hz": {"type": "number"}, "peak_volts_at_jack": {"type": "number"},
+                                "level": {"type": "string", "enum": ["clean", "onset", "driven"]}, "segments": {"type": "array"}}},
+    "calibration": {"type": "object", "required": ["volts_per_full_scale_input_sample", "output_reference_volts_per_full_scale", "output_attenuation_db", "fixed_delay_samples_removed"],
+                    "properties": {"volts_per_full_scale_input_sample": {"type": ["number", "null"]}, "output_reference_volts_per_full_scale": {"type": ["number", "null"]},
+                                   "output_attenuation_db": {"type": ["number", "null"]}, "fixed_delay_samples_removed": {"type": ["number", "null"]}}},
+    "adc_dac": {"type": "object", "required": ["model", "gain"], "properties": {"model": {"type": ["string", "null"]}, "gain": {"type": ["number", "null"]}}},
+    "sample_rate_hz": {"type": "number"},
+    "microphone_pose": {"type": ["object", "null"], "description": "radial position, azimuth, distance from a named surface, angle, microphone model and orientation (Sec. 19)"},
+    "thermal_state": {"type": "object", "required": ["speaker"], "properties": {"speaker": {"type": "string"}}},
+    "ambient": {"type": ["object", "null"]},
+    "operator_notes": {"type": "string"},
+    "model": {"type": "object"},
+    "files": {"type": "object", "required": ["raw", "processed"], "properties": {"raw": {"type": ["object", "null"]}, "processed": {"type": "string"}}}
+  }
+}

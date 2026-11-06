@@ -21,6 +21,15 @@ R Rsel_b1 tp b_t1 1G  dyn ev=PROP note=plug_selector_Instrument_1
 R Rsel_b2 tp b_t2 1G  dyn ev=PROP note=plug_selector_Instrument_2
 R Rsel_n1 tp n_t1 1G  dyn ev=PROP note=plug_selector_Mic_1
 R Rsel_n2 tp n_t2 1G  dyn ev=PROP note=plug_selector_Mic_2
+# ===== Second plug (dossier Sec. 06: "Model four jack sockets explicitly.  Two occupied jacks on the same channel alter the switching and the interaction
+# between sources.")  A second guitar, or a cable terminated in the source impedance (a guitar at rest), in another jack.  Same chain as the first source.
+R Rsrc2    pu2 0   100   dyn ev=PROP note=second_source_resistance_(second_plug)
+L Lpu2     pu2 tp2 1u    dyn ev=PROP note=second_source_inductance_(1uH=ideal_line_mode)
+C Ccab2    tp2 0   20p   dyn ev=PROP note=second_cable_capacitance
+R Rsel2_b1 tp2 b_t1 1G   dyn ev=PROP note=second_plug_selector_Instrument_1
+R Rsel2_b2 tp2 b_t2 1G   dyn ev=PROP note=second_plug_selector_Instrument_2
+R Rsel2_n1 tp2 n_t1 1G   dyn ev=PROP note=second_plug_selector_Mic_1
+R Rsel2_n2 tp2 n_t2 1G   dyn ev=PROP note=second_plug_selector_Mic_2
 # optional patch (jumper) cables between jack tips
 R Rpt_b1b2 b_t1 b_t2 1G dyn ev=PROP
 R Rpt_n1n2 n_t1 n_t2 1G dyn ev=PROP
