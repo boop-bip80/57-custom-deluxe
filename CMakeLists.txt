@@ -175,7 +175,8 @@ if(CD57_BUILD_PLUGIN)
     # host test: loads the built VST3 through JUCE's VST3 host (no external tools needed)
     juce_add_console_app(cd57_host_test PRODUCT_NAME "cd57_host_test")
     target_sources(cd57_host_test PRIVATE tests/PluginHostTest.cpp)
-    target_compile_definitions(cd57_host_test PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_compile_definitions(cd57_host_test PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_MODAL_LOOPS_PERMITTED=1
+                               $<$<CXX_COMPILER_ID:MSVC>:_USE_MATH_DEFINES>)   # this target does not link cd57_core, which carries the define for MSVC
     target_link_libraries(cd57_host_test PRIVATE juce::juce_audio_processors juce::juce_audio_utils juce::juce_recommended_config_flags)
     add_dependencies(cd57_host_test CustomDeluxe57_VST3)
 
