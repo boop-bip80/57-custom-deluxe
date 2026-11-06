@@ -73,6 +73,11 @@ if(CD57_BUILD_TOOLS)
     add_executable(validate_acoustic tools/validate_acoustic.cpp)
     target_link_libraries(validate_acoustic PRIVATE cd57_core)
     add_test(NAME acoustic_validation COMMAND validate_acoustic)
+    # --- numerics tests ---
+    add_executable(validate_numerics tools/validate_numerics.cpp)
+    find_package(Threads REQUIRED)
+    target_link_libraries(validate_numerics PRIVATE cd57_core Threads::Threads)
+    add_test(NAME numerics_validation COMMAND validate_numerics --quick --report ${CMAKE_CURRENT_BINARY_DIR}/numerics_quick.md)
 endif()
 
 # ------------------------------------------------------------------ plugin (VST3 + Standalone)
