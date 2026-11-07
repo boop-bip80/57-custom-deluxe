@@ -23,6 +23,12 @@ This update addresses the **high/medium-priority** modern-control and speaker-lo
 
 Fender sources: [official modern owner's manual](https://www.fmicassets.com/Damroot/Original/10001/%2757%20Custom%20Deluxe%20manual%20MULTI%207708607000a.pdf) (standby and speaker-jack warnings), [official product specifications](https://www.fender.com/products/57-custom-deluxe) (special-design 12-inch alnico and revised tapers). See [`docs/HARDWARE_ROUTE.md`](docs/HARDWARE_ROUTE.md) for the measurement-to-build workflow and [`docs/IMPLEMENTATION_AUDIT_2026-11-06.md`](docs/IMPLEMENTATION_AUDIT_2026-11-06.md) for claim boundaries.
 
+## Editor
+
+![Editor](docs/figures/ui/after_editor.png)
+
+A top-down "lacquered tweed" front panel, drawn procedurally in `plugin/PluginEditor.cpp` (original artwork; no manufacturer images, logos or fonts): chrome control plate with cream pointer knobs (value bubble on hover/drag, double-click resets to the default), jewel pilot that follows the modelled lamp, clickable input jacks, PLAY/STANDBY and POWER switches. Secondary settings sit in a tabbed lower strip (Amp setup / Calibration & lab / Service with live circuit state and scope). The window is resizable (70–150 %, fixed aspect). `cd57_editor_snapshot` (CTest `plugin_editor_snapshot`) renders the editor offscreen at several sizes.
+
 ## What is modelled
 
 | Dossier subsystem | Implementation |
