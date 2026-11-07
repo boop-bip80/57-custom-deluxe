@@ -64,6 +64,7 @@ public:
 private:
     void timerCallback() override;
     void renderBackground();
+    void paintCabinet(juce::Graphics&);
     void showProvenance();
     void showTab(int);
     struct KnobBox { PointerKnob s; juce::Label l; std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> a; };

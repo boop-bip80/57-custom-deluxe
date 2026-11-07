@@ -25,9 +25,9 @@ Fender sources: [official modern owner's manual](https://www.fmicassets.com/Damr
 
 ## Editor
 
-![Editor](docs/figures/ui/after_editor.png)
+![Editor](docs/figures/ui/editor.png)
 
-A top-down "lacquered tweed" front panel, drawn procedurally in `plugin/PluginEditor.cpp` (original artwork; no manufacturer images, logos or fonts): chrome control plate with cream pointer knobs (value bubble on hover/drag, double-click resets to the default), jewel pilot that follows the modelled lamp, clickable input jacks, PLAY/STANDBY and POWER switches. Secondary settings sit in a tabbed lower strip (Amp setup / Calibration & lab / Service with live circuit state and scope). The window is resizable (70–150 %, fixed aspect). `cd57_editor_snapshot` (CTest `plugin_editor_snapshot`) renders the editor offscreen at several sizes.
+A top-down "lacquered tweed" front panel built from original raster textures that `tools/ui/make_ui_textures.py` renders from height fields and noise with one top-left light (tweed twill with yarn variation and lacquer ageing, brushed plate, cream knob sprites, glass jewel, jack nuts, toggles; committed in `plugin/assets/`, embedded as binary data, drawn at up to 3x for HiDPI; no manufacturer images, logos or fonts): chrome control plate with cream pointer knobs (value bubble on hover/drag, double-click resets to the default), jewel pilot that follows the modelled lamp, clickable input jacks, PLAY/STANDBY and POWER switches. Secondary settings sit in a tabbed lower strip (Amp setup / Calibration & lab / Service with live circuit state and scope). The window is resizable (70–150 %, fixed aspect). `cd57_editor_snapshot` (CTest `plugin_editor_snapshot`) renders the editor offscreen at several sizes.
 
 ## What is modelled
 

@@ -170,6 +170,10 @@ if(CD57_BUILD_PLUGIN)
         VST3_CATEGORIES Fx Distortion
         COPY_PLUGIN_AFTER_BUILD FALSE)
 
+    # editor artwork: original raster textures rendered by tools/ui/make_ui_textures.py (committed PNG/JPEG)
+    file(GLOB CD57_UI_ASSETS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/plugin/assets/*.png ${CMAKE_CURRENT_SOURCE_DIR}/plugin/assets/*.jpg)
+    juce_add_binary_data(cd57_ui_assets HEADER_NAME CD57Assets.h NAMESPACE cd57assets SOURCES ${CD57_UI_ASSETS})
+    set_target_properties(cd57_ui_assets PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_sources(CustomDeluxe57 PRIVATE
         plugin/PluginProcessor.cpp plugin/PluginEditor.cpp)
     target_include_directories(CustomDeluxe57 PRIVATE plugin)
@@ -177,7 +181,7 @@ if(CD57_BUILD_PLUGIN)
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
         JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
     target_link_libraries(CustomDeluxe57
-        PRIVATE cd57_core juce::juce_audio_utils juce::juce_dsp
+        PRIVATE cd57_core cd57_ui_assets juce::juce_audio_utils juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
 
     # host test: loads the built VST3 through JUCE's VST3 host (no external tools needed)

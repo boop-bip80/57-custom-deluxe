@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "CD57Assets.h"
 
 using namespace juce;
 namespace pid = cd57ui::id;
@@ -10,6 +11,46 @@ const Colour kTweed(0xffcf9f52), kTweedLight(0xffe6c27a), kTweedDark(0xff8f6326)
              kBrown(0xff4a2615), kWell(0xff24170e), kStrip(0xff1b1410), kStripLine(0xff5d4630), kCream(0xfff1e4c3),
              kCreamDark(0xffc9b68c), kAmber(0xffffc04d), kJewel(0xffff3324);
 Font F(float h, bool bold = false) { return Font(FontOptions(h).withStyle(bold ? "Bold" : "Regular")); }
+// small caps-style label font with a little tracking (screened/engraved legends)
+Font FL(float h, bool bold = true) { return Font(FontOptions(h).withStyle(bold ? "Bold" : "Regular").withKerningFactor(0.09f)); }
+#define CD57_IMG(n) ImageCache::getFromMemory(cd57assets::n, cd57assets::n##Size)
+void drawImg(Graphics& g, const Image& im, Rectangle<float> r, float alpha = 1.0f)
+{
+    g.setOpacity(alpha);
+    g.drawImage(im, r, RectanglePlacement::stretchToFit);
+    g.setOpacity(1.0f);
+}
+void drawImgXf(Graphics& g, const Image& im, Rectangle<float> r, float angle, float alpha = 1.0f)
+{
+    const auto xf = AffineTransform::scale(r.getWidth() / (float)im.getWidth(), r.getHeight() / (float)im.getHeight())
+                        .translated(-r.getWidth() * 0.5f, -r.getHeight() * 0.5f).rotated(angle).translated(r.getCentreX(), r.getCentreY());
+    g.setOpacity(alpha);
+    g.drawImageTransformed(im, xf, false);
+    g.setOpacity(1.0f);
+}
+// engraved legend on metal: a light lower edge under a dark, slightly transparent fill (light from the top left)
+void engrave(Graphics& g, const String& t, Rectangle<float> r, float h, Justification j = Justification::centred, Colour ink = Colour(0xff2f2620))
+{
+    g.setFont(FL(h));
+    g.setColour(Colours::white.withAlpha(0.55f)); g.drawText(t, r.translated(0.0f, jmax(0.6f, h * 0.07f)), j);
+    g.setColour(ink.withAlpha(0.82f)); g.drawText(t, r, j);
+}
+// screened legend on tweed/strip: plain ink, no relief
+void screen(Graphics& g, const String& t, Rectangle<float> r, float h, Colour c, Justification j = Justification::centred, bool bold = false)
+{
+    g.setFont(FL(h, bold)); g.setColour(c); g.drawText(t, r, j);
+}
+// outline of the cream pointer, in units of the skirt radius (must match tools/ui/make_ui_textures.py)
+Path pointerPath(float kr)
+{
+    const float nose = 1.22f, tail = 0.62f, half = 0.36f;
+    Path p; const int n = 48;
+    auto w = [&](float y) { return y < 0 ? half * std::pow(jlimit(0.0f, 1.0f, 1.0f + y / nose), 0.75f) : half * std::sqrt(jmax(0.0f, 1.0f - (y / tail) * (y / tail))); };
+    for (int i = 0; i <= n; ++i) { const float y = -nose + (nose + tail) * (float)i / (float)n; const float x = w(y); if (i == 0) p.startNewSubPath(x * kr, y * kr); else p.lineTo(x * kr, y * kr); }
+    for (int i = n; i >= 0; --i) { const float y = -nose + (nose + tail) * (float)i / (float)n; p.lineTo(-w(y) * kr, y * kr); }
+    p.closeSubPath();
+    return p;
+}
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------- look & feel
@@ -44,167 +85,132 @@ Font CD57LookAndFeel::getTextButtonFont(TextButton&, int h) { return F(jmin(13.0
 void CD57LookAndFeel::drawButtonBackground(Graphics& g, Button& b, const Colour&, bool over, bool down)
 {
     const auto r = b.getLocalBounds().toFloat().reduced(0.5f);
-    const bool on = b.getToggleState();
-    g.setColour(on ? kCream : Colour(0xff3a2b1f).brighter(over ? 0.15f : 0.0f).darker(down ? 0.2f : 0.0f));
-    g.fillRoundedRectangle(r, 4.0f * scale);
-    g.setColour(on ? kCreamDark : kStripLine);
-    g.drawRoundedRectangle(r, 4.0f * scale, 1.0f);
+    if (b.getProperties()["tab"]) {   // tabs: no box, an amber rule under the active page
+        if (b.getToggleState()) { g.setColour(kAmber.withAlpha(0.9f)); g.fillRoundedRectangle(r.withTop(r.getBottom() - 2.0f * scale).reduced(r.getWidth() * 0.18f, 0), 1.0f); }
+        else if (over) { g.setColour(kCreamDark.withAlpha(0.35f)); g.fillRect(r.withTop(r.getBottom() - 1.0f).reduced(r.getWidth() * 0.25f, 0)); }
+        return;
+    }
+    g.setColour(Colours::white.withAlpha(down ? 0.10f : (over ? 0.06f : 0.02f)));
+    g.fillRoundedRectangle(r, r.getHeight() * 0.5f);
+    g.setColour((over ? kAmber : kCreamDark).withAlpha(over ? 0.8f : 0.45f));
+    g.drawRoundedRectangle(r, r.getHeight() * 0.5f, 1.0f);
 }
 
 void CD57LookAndFeel::drawRotarySlider(Graphics& g, int x, int y, int w, int h, float pos, float a0, float a1, Slider& s)
 {
+    g.setImageResamplingQuality(Graphics::highResamplingQuality);
     const auto bounds = Rectangle<float>((float)x, (float)y, (float)w, (float)h);
     const float bubbleH = 20.0f * scale;
     const auto area = bounds.withTrimmedBottom(bubbleH + 2.0f * scale);
-    const float R = jmin(area.getWidth(), area.getHeight()) * 0.5f;      // radius of the printed scale's numbers
+    const float R = jmin(area.getWidth(), area.getHeight()) * 0.5f;
     const auto ctr = area.getCentre();
     const float kr = R * 0.56f;                                          // skirt radius
-    // printed scale 1..12 on the plate (engraved: dark fill with a light lower edge)
+    // engraved scale 1..12 and tick marks on the plate
     for (int i = 1; i <= 12; ++i) {
         const float a = a0 + (a1 - a0) * (float)(i - 1) / 11.0f;
         const float sn = std::sin(a), cs = -std::cos(a);
-        const float r0 = kr + 4.0f * scale, r1 = kr + 9.0f * scale;
-        g.setColour(kEngrave);
-        g.drawLine(ctr.x + sn * r0, ctr.y + cs * r0, ctr.x + sn * r1, ctr.y + cs * r1, 1.4f * scale);
+        const float r0 = kr + 5.0f * scale, r1 = kr + 9.5f * scale;
+        g.setColour(Colours::white.withAlpha(0.5f));
+        g.drawLine(ctr.x + sn * r0, ctr.y + cs * r0 + 0.8f * scale, ctr.x + sn * r1, ctr.y + cs * r1 + 0.8f * scale, 1.1f * scale);
+        g.setColour(Colour(0xff2f2620).withAlpha(0.8f));
+        g.drawLine(ctr.x + sn * r0, ctr.y + cs * r0, ctr.x + sn * r1, ctr.y + cs * r1, 1.1f * scale);
         const float rt = kr + 19.0f * scale;
-        const auto tr = Rectangle<float>(ctr.x + sn * rt - 10.0f * scale, ctr.y + cs * rt - 7.0f * scale, 20.0f * scale, 14.0f * scale);
-        g.setFont(F(11.5f * scale, true));
-        g.setColour(Colours::white.withAlpha(0.55f)); g.drawText(String(i), tr.translated(0, 0.8f * scale), Justification::centred);
-        g.setColour(kEngrave); g.drawText(String(i), tr, Justification::centred);
+        engrave(g, String(i), Rectangle<float>(20.0f * scale, 14.0f * scale).withCentre({ctr.x + sn * rt, ctr.y + cs * rt}), 11.0f * scale);
     }
-    // drop shadow
-    g.setColour(Colours::black.withAlpha(0.28f));
-    g.fillEllipse(Rectangle<float>(kr * 2.1f, kr * 2.1f).withCentre(ctr.translated(2.5f * scale, 4.0f * scale)));
-    // skirt: cream disc with knurled rim and a soft dome
-    const auto sk = Rectangle<float>(kr * 2.0f, kr * 2.0f).withCentre(ctr);
-    g.setGradientFill(ColourGradient(kCream.brighter(0.15f), sk.getX(), sk.getY(), kCreamDark.darker(0.15f), sk.getRight(), sk.getBottom(), false));
-    g.fillEllipse(sk);
-    g.setColour(kCreamDark.darker(0.35f));
-    for (int i = 0; i < 36; ++i) {
-        const float a = MathConstants<float>::twoPi * (float)i / 36.0f;
-        g.drawLine(ctr.x + std::sin(a) * kr * 0.86f, ctr.y - std::cos(a) * kr * 0.86f, ctr.x + std::sin(a) * kr * 0.98f, ctr.y - std::cos(a) * kr * 0.98f, 0.9f * scale);
-    }
-    g.setColour(kInk.withAlpha(0.45f)); g.drawEllipse(sk, 1.0f * scale);
-    g.setGradientFill(ColourGradient(Colours::white.withAlpha(0.35f), ctr.x - kr * 0.4f, ctr.y - kr * 0.5f, Colours::transparentWhite, ctr.x + kr * 0.3f, ctr.y + kr * 0.4f, true));
-    g.fillEllipse(sk.reduced(kr * 0.2f));
-    // pointer ("chicken head"): long tapered nose, short rounded tail
+    // sprites: the skirt is rotationally symmetric, so it and its shadow stay fixed (lighting stays top-left);
+    // the pointer and its shadow rotate; a screen-fixed highlight is added over the pointer afterwards
+    static const Image skirt = CD57_IMG(knob_skirt_png), skirtSh = CD57_IMG(knob_skirt_shadow_png),
+                       ptr = CD57_IMG(knob_pointer_png), ptrSh = CD57_IMG(knob_pointer_shadow_png);
+    const float side = kr / 0.40f;                                       // sprite side: skirt radius = 0.40 x side
+    const auto spr = Rectangle<float>(side, side).withCentre(ctr);
     const float ang = a0 + pos * (a1 - a0);
-    Path ptr;
-    const float nose = kr * 1.22f, tail = kr * 0.62f, half = kr * 0.36f;
-    ptr.startNewSubPath(0.0f, -nose);
-    ptr.cubicTo(half * 0.35f, -nose * 0.75f, half, -kr * 0.25f, half, 0.0f);
-    ptr.cubicTo(half, tail * 0.75f, half * 0.55f, tail, 0.0f, tail);
-    ptr.cubicTo(-half * 0.55f, tail, -half, tail * 0.75f, -half, 0.0f);
-    ptr.cubicTo(-half, -kr * 0.25f, -half * 0.35f, -nose * 0.75f, 0.0f, -nose);
-    ptr.closeSubPath();
-    const auto xf = AffineTransform::rotation(ang).translated(ctr.x, ctr.y);
-    g.setColour(Colours::black.withAlpha(0.30f));
-    g.fillPath(ptr, xf.translated(2.0f * scale, 3.0f * scale));
-    g.setGradientFill(ColourGradient(kCream.brighter(0.2f), ctr.x - kr, ctr.y - kr, kCreamDark, ctr.x + kr, ctr.y + kr, false));
-    g.fillPath(ptr, xf);
-    g.setColour(kInk.withAlpha(0.5f));
-    g.strokePath(ptr, PathStrokeType(1.0f * scale), xf);
-    Path line; line.startNewSubPath(0.0f, -nose * 0.92f); line.lineTo(0.0f, -kr * 0.25f);
-    g.setColour(kBrown); g.strokePath(line, PathStrokeType(2.0f * scale, PathStrokeType::curved, PathStrokeType::rounded), xf);
-    g.setColour(kCreamDark.darker(0.2f)); g.fillEllipse(Rectangle<float>(kr * 0.22f, kr * 0.22f).withCentre(ctr));   // set-screw
+    drawImg(g, skirtSh, spr.translated(3.0f * scale, 5.0f * scale).expanded(2.0f * scale));
+    drawImg(g, skirt, spr);
+    drawImgXf(g, ptrSh, spr.translated(2.5f * scale, 4.0f * scale), ang, 0.9f);
+    drawImgXf(g, ptr, spr, ang);
+    {
+        Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(pointerPath(kr), AffineTransform::rotation(ang).translated(ctr.x, ctr.y));
+        g.setGradientFill(ColourGradient(Colours::white.withAlpha(0.42f), ctr.x - kr * 0.9f, ctr.y - kr * 1.0f, Colours::black.withAlpha(0.18f), ctr.x + kr * 0.8f, ctr.y + kr * 0.9f, false));
+        g.fillRect(spr);
+    }
     // value readout while hovering or dragging
     if (s.isMouseOverOrDragging()) {
         const String txt = s.getTextFromValue(s.getValue());
         g.setFont(F(12.0f * scale, true));
         const float tw = jmax(48.0f * scale, GlyphArrangement::getStringWidth(g.getCurrentFont(), txt) + 16.0f * scale);
         const auto pill = Rectangle<float>(tw, bubbleH).withCentre({ctr.x, bounds.getBottom() - bubbleH * 0.5f - 1.0f});
-        g.setColour(kStrip.withAlpha(0.92f)); g.fillRoundedRectangle(pill, bubbleH * 0.5f);
-        g.setColour(kAmber); g.drawRoundedRectangle(pill, bubbleH * 0.5f, 1.0f);
+        g.setColour(Colour(0xe6120d0a)); g.fillRoundedRectangle(pill, bubbleH * 0.5f);
+        g.setColour(kAmber.withAlpha(0.7f)); g.drawRoundedRectangle(pill, bubbleH * 0.5f, 1.0f);
         g.setColour(kCream); g.drawText(txt, pill, Justification::centred);
     }
 }
 
 void CD57LookAndFeel::drawLinearSlider(Graphics& g, int x, int y, int w, int h, float pos, float, float, Slider::SliderStyle, Slider& s)
 {
-    const float cy = (float)y + h * 0.5f, th = 4.0f * scale, kr = 6.5f * scale;
-    g.setColour(Colour(0xff0f0b08));
+    const float cy = (float)y + h * 0.5f, th = 2.0f * scale, kr = 6.0f * scale;
+    g.setColour(Colours::black.withAlpha(0.55f));
     g.fillRoundedRectangle((float)x, cy - th * 0.5f, (float)w, th, th * 0.5f);
-    g.setColour(kAmber.withAlpha(0.65f));
+    g.setColour(Colours::white.withAlpha(0.06f)); g.drawHorizontalLine((int)(cy + th), (float)x, (float)(x + w));
+    g.setColour(kAmber.withAlpha(0.55f));
     g.fillRoundedRectangle((float)x, cy - th * 0.5f, jmax(0.0f, pos - (float)x), th, th * 0.5f);
-    g.setGradientFill(ColourGradient(kCream.brighter(0.2f), pos, cy - kr, kCreamDark, pos, cy + kr, false));
+    g.setColour(Colours::black.withAlpha(0.4f)); g.fillEllipse(pos - kr + 1.0f, cy - kr + 2.0f, kr * 2, kr * 2);
+    g.setGradientFill(ColourGradient(kCream.brighter(0.2f), pos - kr * 0.5f, cy - kr, kCreamDark.darker(0.25f), pos + kr * 0.5f, cy + kr, false));
     g.fillEllipse(pos - kr, cy - kr, kr * 2, kr * 2);
-    g.setColour(s.isMouseOverOrDragging() ? kAmber : kInk.withAlpha(0.6f));
-    g.drawEllipse(pos - kr, cy - kr, kr * 2, kr * 2, 1.0f);
+    if (s.isMouseOverOrDragging()) { g.setColour(kAmber.withAlpha(0.8f)); g.drawEllipse(pos - kr, cy - kr, kr * 2, kr * 2, 1.0f); }
 }
 
 void CD57LookAndFeel::drawComboBox(Graphics& g, int w, int h, bool, int, int, int, int, ComboBox& b)
 {
-    const auto r = Rectangle<float>(0, 0, (float)w, (float)h).reduced(0.5f);
-    g.setColour(b.findColour(ComboBox::backgroundColourId).brighter(b.isMouseOver() ? 0.12f : 0.0f));
-    g.fillRoundedRectangle(r, 4.0f * scale);
-    g.setColour(b.isMouseOver() ? kAmber.withAlpha(0.7f) : b.findColour(ComboBox::outlineColourId));
-    g.drawRoundedRectangle(r, 4.0f * scale, 1.0f);
-    const float ax = (float)w - 12.0f * scale, ay = (float)h * 0.5f;
-    Path a; a.addTriangle(ax - 4.0f * scale, ay - 2.0f * scale, ax + 4.0f * scale, ay - 2.0f * scale, ax, ay + 3.0f * scale);
-    g.setColour(kCream); g.fillPath(a);
+    const auto r = Rectangle<float>(0, 0, (float)w, (float)h);
+    if (b.isMouseOver()) { g.setColour(Colours::white.withAlpha(0.04f)); g.fillRoundedRectangle(r, 3.0f * scale); }
+    g.setColour((b.isMouseOver() ? kAmber : kCreamDark).withAlpha(b.isMouseOver() ? 0.8f : 0.28f));
+    g.fillRect(r.withTop(r.getBottom() - 1.0f));
+    const float ax = (float)w - 10.0f * scale, ay = (float)h * 0.5f;
+    Path a; a.startNewSubPath(ax - 3.5f * scale, ay - 1.5f * scale); a.lineTo(ax, ay + 2.0f * scale); a.lineTo(ax + 3.5f * scale, ay - 1.5f * scale);
+    g.setColour(kCreamDark); g.strokePath(a, PathStrokeType(1.2f * scale, PathStrokeType::curved, PathStrokeType::rounded));
 }
 
 void CD57LookAndFeel::drawToggleButton(Graphics& g, ToggleButton& b, bool over, bool)
 {
     const auto r = b.getLocalBounds().toFloat();
-    const float s = 15.0f * scale;
-    const auto box = Rectangle<float>(2.0f, (r.getHeight() - s) * 0.5f, s, s);
-    g.setColour(Colour(0xff0f0b08)); g.fillRoundedRectangle(box, 3.0f * scale);
-    g.setColour(over ? kAmber : kStripLine); g.drawRoundedRectangle(box, 3.0f * scale, 1.0f);
-    if (b.getToggleState()) { g.setColour(kAmber); g.fillRoundedRectangle(box.reduced(3.5f * scale), 2.0f); }
-    g.setColour(kCream); g.setFont(F(12.5f * scale));
-    g.drawText(b.getButtonText(), (int)(box.getRight() + 6 * scale), 0, b.getWidth() - (int)box.getRight() - 6, b.getHeight(), Justification::centredLeft);
+    const float hh = 12.0f * scale, ww = 22.0f * scale;
+    const auto tr = Rectangle<float>(2.0f, (r.getHeight() - hh) * 0.5f, ww, hh);
+    const bool on = b.getToggleState();
+    g.setColour(on ? kAmber.withAlpha(0.75f) : Colours::black.withAlpha(0.55f)); g.fillRoundedRectangle(tr, hh * 0.5f);
+    g.setColour((over ? kAmber : kCreamDark).withAlpha(0.45f)); g.drawRoundedRectangle(tr, hh * 0.5f, 1.0f);
+    const float d = hh - 3.0f * scale;
+    g.setColour(kCream); g.fillEllipse(on ? tr.getRight() - d - 1.5f * scale : tr.getX() + 1.5f * scale, tr.getY() + 1.5f * scale, d, d);
+    g.setColour(on ? kCream : kCreamDark); g.setFont(F(12.0f * scale));
+    g.drawText(b.getButtonText(), (int)(tr.getRight() + 8 * scale), 0, b.getWidth() - (int)tr.getRight() - 8, b.getHeight(), Justification::centredLeft);
 }
 
 // ---------------------------------------------------------------------------------------------------- small components
 void JackComponent::paint(Graphics& g)
 {
+    g.setImageResamplingQuality(Graphics::highResamplingQuality);
+    static const Image nut = CD57_IMG(jack_nut_png), plug = CD57_IMG(jack_plug_png), sh = CD57_IMG(nut_shadow_png);
     const auto r = getLocalBounds().toFloat();
-    const float d = jmin(r.getWidth(), r.getHeight() - r.getHeight() * 0.22f) * 0.72f;
-    const auto c = Rectangle<float>(d, d).withCentre({r.getCentreX(), r.getY() + d * 0.5f + r.getHeight() * 0.06f});
-    // chrome hex nut + bushing
-    Path nut; nut.addPolygon(c.getCentre(), 6, d * 0.5f, MathConstants<float>::pi / 6.0f);
-    g.setColour(Colours::black.withAlpha(0.25f)); g.fillPath(nut, AffineTransform::translation(1.5f, 2.5f));
-    g.setGradientFill(ColourGradient(kChrome, c.getX(), c.getY(), kChromeDark, c.getRight(), c.getBottom(), false));
-    g.fillPath(nut);
-    g.setColour(kInk.withAlpha(0.35f)); g.strokePath(nut, PathStrokeType(1.0f));
-    g.setColour(Colour(0xff0b0907)); g.fillEllipse(c.reduced(d * 0.24f));
-    g.setColour(kChromeDark); g.drawEllipse(c.reduced(d * 0.24f), 1.4f);
-    if (selected) {   // plug inserted: nickel sleeve and a cable leaving downward
-        g.setGradientFill(ColourGradient(Colour(0xfff0e2b0), c.getX(), c.getY(), Colour(0xff8e7a3a), c.getRight(), c.getBottom(), false));
-        g.fillEllipse(c.reduced(d * 0.30f));
-        g.setColour(Colour(0xff15110d)); g.fillEllipse(c.reduced(d * 0.40f));
-    }
-    g.setFont(F(r.getHeight() * 0.15f, true));
-    const auto lr = r.withTop(r.getBottom() - r.getHeight() * 0.22f);
-    g.setColour(Colours::white.withAlpha(0.5f)); g.drawText(label, lr.translated(0, 0.8f), Justification::centred);
-    g.setColour(kEngrave); g.drawText(label, lr, Justification::centred);
+    const float lab = r.getHeight() * 0.22f;
+    const float d = jmin(r.getWidth(), r.getHeight() - lab) * 0.86f;
+    const auto c = Rectangle<float>(d, d).withCentre({r.getCentreX(), r.getY() + (r.getHeight() - lab) * 0.5f});
+    drawImg(g, sh, c.translated(d * 0.03f, d * 0.05f).expanded(d * 0.04f));
+    drawImg(g, nut, c);
+    if (selected) drawImg(g, plug, c);
+    engrave(g, label, r.withTop(r.getBottom() - lab), lab * 0.62f);
 }
 
 void ToggleSwitch::paint(Graphics& g)
 {
+    g.setImageResamplingQuality(Graphics::highResamplingQuality);
+    static const Image up = CD57_IMG(toggle_up_png), down = CD57_IMG(toggle_down_png);
     const auto r = getLocalBounds().toFloat();
-    const float u = r.getWidth() / 80.0f;
-    const auto txtH = 14.0f * u;
-    g.setFont(F(11.0f * u, true));
-    g.setColour(on ? kEngrave : kEngrave.withAlpha(0.45f)); g.drawText(onText, r.withHeight(txtH), Justification::centred);
-    g.setColour(!on ? kEngrave : kEngrave.withAlpha(0.45f)); g.drawText(offText, r.withTrimmedBottom(txtH).removeFromBottom(txtH), Justification::centred);
-    const float cx = r.getCentreX(), cy = r.getCentreY() - 2.0f * u;
-    // chrome nut and bat lever (seen from above: the lever leans towards the active legend)
-    Path nut; nut.addPolygon({cx, cy}, 6, 14.0f * u, 0.0f);
-    g.setGradientFill(ColourGradient(kChrome, cx - 14 * u, cy - 14 * u, kChromeDark, cx + 14 * u, cy + 14 * u, false));
-    g.fillPath(nut);
-    g.setColour(kInk.withAlpha(0.35f)); g.strokePath(nut, PathStrokeType(1.0f));
-    const float dir = on ? -1.0f : 1.0f;
-    Path bat; bat.addRoundedRectangle(cx - 4.5f * u, jmin(cy, cy + dir * 26.0f * u), 9.0f * u, 26.0f * u, 4.5f * u);
-    g.setColour(Colours::black.withAlpha(0.3f)); g.fillPath(bat, AffineTransform::translation(2.0f * u, 3.0f * u));
-    g.setGradientFill(ColourGradient(Colours::white, cx - 4 * u, cy, kChromeDark, cx + 5 * u, cy, false));
-    g.fillPath(bat);
-    g.setColour(kChromeMid); g.fillEllipse(cx - 5.5f * u, cy + dir * 26.0f * u - 5.5f * u, 11.0f * u, 11.0f * u);
-    g.setFont(F(11.5f * u, true));
-    const auto lr = r.withTop(r.getBottom() - txtH);
-    g.setColour(Colours::white.withAlpha(0.5f)); g.drawText(label, lr.translated(0, 0.8f), Justification::centred);
-    g.setColour(kEngrave); g.drawText(label, lr, Justification::centred);
+    const float u = r.getWidth() / 80.0f, txtH = 14.0f * u;
+    engrave(g, onText, r.withHeight(txtH), 10.5f * u, Justification::centred, on ? Colour(0xff2f2620) : Colour(0x802f2620));
+    engrave(g, offText, r.withTrimmedBottom(txtH).removeFromBottom(txtH), 10.5f * u, Justification::centred, !on ? Colour(0xff2f2620) : Colour(0x802f2620));
+    const float side = jmin(r.getWidth() * 1.05f, r.getHeight() - 2.0f * txtH - 4.0f * u);
+    drawImg(g, on ? up : down, Rectangle<float>(side, side).withCentre({r.getCentreX(), r.getCentreY() - 3.0f * u}));
+    engrave(g, label, r.withTop(r.getBottom() - txtH), 11.0f * u);
 }
 
 // ---------------------------------------------------------------------------------------------------- editor
@@ -292,6 +298,9 @@ CD57Editor::CD57Editor(CD57AudioProcessor& p) : AudioProcessorEditor(&p), proc_(
         tabBtn_[i].setButtonText(tn[i]);
         tabBtn_[i].setClickingTogglesState(false);
         tabBtn_[i].onClick = [this, i] { showTab(i); };
+        tabBtn_[i].getProperties().set("tab", true);
+        tabBtn_[i].setColour(TextButton::textColourOnId, kCream);
+        tabBtn_[i].setColour(TextButton::textColourOffId, kCreamDark.withAlpha(0.6f));
         addAndMakeVisible(tabBtn_[i]);
     }
     showTab(0);
@@ -316,7 +325,7 @@ void CD57Editor::knob(KnobBox& k, const char* id, const char* text)
     k.l.setText(text, dontSendNotification); k.l.setJustificationType(Justification::centred);
     k.l.setColour(Label::textColourId, kEngrave);
     k.l.setInterceptsMouseClicks(false, false);
-    addAndMakeVisible(k.s); addAndMakeVisible(k.l);
+    addAndMakeVisible(k.s); addChildComponent(k.l);   // the legend is engraved on the plate in paint(); the label keeps it accessible
     k.a = std::make_unique<AudioProcessorValueTreeState::SliderAttachment>(proc_.apvts, id, k.s);
 }
 void CD57Editor::combo(ComboBoxRow& c, const char* id, const char* text, int tab)
@@ -353,117 +362,86 @@ void CD57Editor::showTab(int t)
 }
 
 // static artwork, rendered once per size: tweed cabinet, chassis well, brushed chrome plate, strip background
-void CD57Editor::renderBackground()
+// Artwork is drawn directly from the high-resolution textures on every paint (no logical-size cache), so it stays
+// sharp on HiDPI displays.  Light comes from the top left everywhere.
+void CD57Editor::renderBackground() {}
+
+void CD57Editor::paintCabinet(Graphics& g)
 {
-    const int W = getWidth(), H = getHeight();
-    if (W <= 0 || H <= 0) return;
-    background_ = Image(Image::RGB, W, H, true);
-    Graphics g(background_);
+    g.setImageResamplingQuality(Graphics::highResamplingQuality);
+    static const Image tweed = CD57_IMG(tweed_jpg), plate = CD57_IMG(plate_png), screw = CD57_IMG(screw_png);
     const float s = sc_;
-    // tweed: diagonal twill in two thread colours plus a cross-hatch, then fibre noise and an amber lacquer vignette
-    g.fillAll(kTweed);
-    const float step = 4.0f * s;
-    for (float i = (float)-H; i < (float)W; i += step) {
-        g.setColour(kTweedDark.withAlpha(0.30f)); g.drawLine(i, 0.0f, i + (float)H, (float)H, 1.5f * s);
-        g.setColour(kTweedLight.withAlpha(0.35f)); g.drawLine(i + step * 0.5f, 0.0f, i + step * 0.5f + (float)H, (float)H, 0.9f * s);
-    }
-    for (float i = 0; i < (float)(W + H); i += step * 3.0f) {
-        g.setColour(kTweedDark.withAlpha(0.10f)); g.drawLine(i, 0.0f, i - (float)H, (float)H, 0.8f * s);
-    }
-    Random rnd(1957);
-    for (int i = 0; i < W * H / 60; ++i) {
-        g.setColour((rnd.nextBool() ? Colours::black : Colours::white).withAlpha(0.05f));
-        g.fillRect(rnd.nextInt(W), rnd.nextInt(H), 1 + rnd.nextInt(3), 1);
-    }
-    g.setGradientFill(ColourGradient(Colours::transparentBlack, W * 0.5f, H * 0.3f, kLacquer.withAlpha(0.55f), 0.0f, 0.0f, true));
-    g.fillAll();
-    g.setGradientFill(ColourGradient(Colour(0x30ffcc66), 0, 0, Colours::transparentBlack, 0, (float)strip_.getY(), false));
-    g.fillRect(0, 0, W, strip_.getY());
+    const auto top = getLocalBounds().withBottom(strip_.getY()).toFloat();
+    drawImg(g, tweed, top.withHeight(top.getWidth() * (float)tweed.getHeight() / (float)tweed.getWidth()));
 
-    // chassis well (the opening in the cabinet top) with an inner shadow
+    // chassis well: dark opening with a soft inner shadow from the top-left light
     const auto wf = well_.toFloat();
-    g.setColour(Colours::black.withAlpha(0.35f)); g.fillRoundedRectangle(wf.expanded(3.0f * s).translated(0, 2.0f * s), 10.0f * s);
+    g.setColour(Colours::white.withAlpha(0.10f)); g.drawRoundedRectangle(wf.expanded(1.5f * s).translated(0, 1.0f * s), 10.0f * s, 1.2f * s);
     g.setColour(kWell); g.fillRoundedRectangle(wf, 9.0f * s);
-    g.setGradientFill(ColourGradient(Colours::black.withAlpha(0.6f), 0, wf.getY(), Colours::transparentBlack, 0, wf.getY() + 18.0f * s, false));
-    g.fillRoundedRectangle(wf, 9.0f * s);
-
-    // brushed chrome plate
-    const auto pf = plate_.toFloat();
-    g.setGradientFill(ColourGradient(kChrome, 0, pf.getY(), kChromeDark, 0, pf.getBottom(), false));
-    g.fillRoundedRectangle(pf, 5.0f * s);
-    Random br(7);
-    for (int yy = plate_.getY(); yy < plate_.getBottom(); ++yy) {
-        g.setColour((br.nextBool() ? Colours::white : Colours::black).withAlpha(0.025f + 0.03f * br.nextFloat()));
-        g.drawHorizontalLine(yy, pf.getX() + 2.0f, pf.getRight() - 2.0f);
+    {
+        Graphics::ScopedSaveState ss(g);
+        Path wp; wp.addRoundedRectangle(wf, 9.0f * s); g.reduceClipRegion(wp);
+        DropShadow(Colours::black.withAlpha(0.85f), roundToInt(16 * s), {roundToInt(4 * s), roundToInt(6 * s)}).drawForRectangle(g, plate_);
+        g.setGradientFill(ColourGradient(Colours::black.withAlpha(0.65f), 0, wf.getY(), Colours::transparentBlack, 0, wf.getY() + 22.0f * s, false));
+        g.fillRect(wf);
     }
-    g.setGradientFill(ColourGradient(Colours::white.withAlpha(0.35f), 0, pf.getY(), Colours::transparentWhite, 0, pf.getY() + pf.getHeight() * 0.35f, false));
-    g.fillRoundedRectangle(pf, 5.0f * s);
-    g.setColour(Colours::black.withAlpha(0.45f)); g.drawRoundedRectangle(pf, 5.0f * s, 1.2f * s);
-    // plate screws
+    // brushed plate and its screws
+    drawImg(g, plate, plate_.toFloat());
+    const auto pf = plate_.toFloat();
     for (float sx : {pf.getX() + 12.0f * s, pf.getRight() - 12.0f * s})
         for (float sy : {pf.getY() + 12.0f * s, pf.getBottom() - 12.0f * s}) {
-            const auto c = Rectangle<float>(9.0f * s, 9.0f * s).withCentre({sx, sy});
-            g.setGradientFill(ColourGradient(kChrome, c.getX(), c.getY(), kChromeDark, c.getRight(), c.getBottom(), false)); g.fillEllipse(c);
-            g.setColour(kInk.withAlpha(0.6f)); g.drawLine(c.getX() + 1.5f * s, c.getCentreY(), c.getRight() - 1.5f * s, c.getCentreY(), 1.2f * s);
+            g.setColour(Colours::black.withAlpha(0.25f)); g.fillEllipse(Rectangle<float>(10.0f * s, 10.0f * s).withCentre({sx + 0.8f * s, sy + 1.4f * s}));
+            drawImg(g, screw, Rectangle<float>(9.5f * s, 9.5f * s).withCentre({sx, sy}));
         }
-    // engraved section rules
-    auto rule = [&](float x) { g.setColour(kEngrave.withAlpha(0.55f)); g.drawVerticalLine(S(x), pf.getY() + 18 * s, pf.getBottom() - 18 * s);
-                               g.setColour(Colours::white.withAlpha(0.5f)); g.drawVerticalLine(S(x) + 1, pf.getY() + 18 * s, pf.getBottom() - 18 * s); };
+    // engraved section rules (groove: dark line with a light lower/right edge)
+    auto rule = [&](float x) { g.setColour(Colour(0xff2f2620).withAlpha(0.45f)); g.fillRect(Rectangle<float>((float)S(x), pf.getY() + 20 * s, 1.0f * s, pf.getHeight() - 40 * s));
+                               g.setColour(Colours::white.withAlpha(0.55f)); g.fillRect(Rectangle<float>((float)S(x) + 1.0f * s, pf.getY() + 20 * s, 1.0f * s, pf.getHeight() - 40 * s)); };
     rule(248.0f); rule(762.0f);
 
-    // name plate on the tweed (plain type; no manufacturer marks)
-    const auto np = R(400, 16, 300, 44).toFloat();
-    g.setColour(Colours::black.withAlpha(0.3f)); g.fillRoundedRectangle(np.translated(0, 2.0f * s), 6.0f * s);
-    g.setGradientFill(ColourGradient(kBrown.brighter(0.25f), 0, np.getY(), kBrown.darker(0.3f), 0, np.getBottom(), false));
-    g.fillRoundedRectangle(np, 6.0f * s);
-    g.setColour(kCreamDark); g.drawRoundedRectangle(np.reduced(3.0f * s), 4.0f * s, 1.0f * s);
-    g.setColour(kCream); g.setFont(F(21.0f * s, true));
-    g.drawText("'57 CUSTOM DELUXE", np.withTrimmedBottom(13.0f * s), Justification::centred);
-    g.setFont(F(9.5f * s)); g.setColour(kCreamDark);
-    g.drawText("CIRCUIT-LEVEL MODEL  -  DOCUMENTED APPROXIMATION", np.withTrimmedTop(26.0f * s).withTrimmedBottom(4.0f * s), Justification::centred);
-    // hint on the tweed
-    g.setColour(kInk.withAlpha(0.7f)); g.setFont(F(11.0f * s));
-    g.drawText("drag a knob or hover for its value  -  double-click resets  -  click a jack to plug in  -  drag the corner to resize",
-               R(28, 326, 1044, 18), Justification::centred);
+    // name plate on the tweed: dark lacquered brown with a screened cream legend (plain type; no manufacturer marks)
+    const auto np = R(410, 18, 280, 40).toFloat();
+    DropShadow(Colours::black.withAlpha(0.5f), roundToInt(6 * s), {roundToInt(2 * s), roundToInt(3 * s)}).drawForRectangle(g, np.toNearestInt());
+    g.setGradientFill(ColourGradient(Colour(0xff3f2215), np.getX(), np.getY(), Colour(0xff1d0f08), np.getRight(), np.getBottom(), false));
+    g.fillRoundedRectangle(np, 4.0f * s);
+    g.setGradientFill(ColourGradient(Colours::white.withAlpha(0.14f), 0, np.getY(), Colours::transparentWhite, 0, np.getCentreY(), false));
+    g.fillRoundedRectangle(np.reduced(1.0f * s), 3.5f * s);
+    g.setColour(Colour(0xffb59a6a).withAlpha(0.55f)); g.drawRoundedRectangle(np.reduced(3.0f * s), 2.5f * s, 0.8f * s);
+    screen(g, "'57 CUSTOM DELUXE", np.withTrimmedBottom(13.0f * s).translated(0, 1.0f * s), 18.0f * s, kCream.withAlpha(0.92f), Justification::centred, true);
+    screen(g, "CIRCUIT-LEVEL MODEL  -  DOCUMENTED APPROXIMATION", np.withTrimmedTop(25.0f * s).withTrimmedBottom(4.0f * s), 8.0f * s, Colour(0xffcdb488));
 
-    // lower strip
+    // lower strip: deep brown-black, soft top edge, no boxes
     const auto sf = strip_.toFloat();
-    g.setGradientFill(ColourGradient(kStrip.brighter(0.08f), 0, sf.getY(), kStrip.darker(0.3f), 0, sf.getBottom(), false));
+    g.setGradientFill(ColourGradient(Colour(0xff17110d), 0, sf.getY(), Colour(0xff0b0806), 0, sf.getBottom(), false));
     g.fillRect(sf);
-    g.setColour(Colours::black.withAlpha(0.6f)); g.fillRect(sf.withHeight(3.0f * s));
-    g.setColour(kStripLine); g.drawHorizontalLine(strip_.getY() + S(3), 0.0f, (float)W);
-    g.setColour(kStripLine.withAlpha(0.6f)); g.drawHorizontalLine(status_.getY() - S(4), sf.getX() + 20 * s, sf.getRight() - 20 * s);
+    g.setGradientFill(ColourGradient(Colours::black.withAlpha(0.7f), 0, sf.getY(), Colours::transparentBlack, 0, sf.getY() + 10.0f * s, false));
+    g.fillRect(sf.withHeight(10.0f * s));
+    g.setColour(Colour(0xff6a5236).withAlpha(0.5f)); g.drawHorizontalLine(strip_.getY(), 0.0f, (float)getWidth());
+    g.setColour(Colours::white.withAlpha(0.05f)); g.drawHorizontalLine(S(392), sf.getX() + 24 * s, sf.getRight() - 24 * s);
+    screen(g, "hover a knob for its value  -  double-click resets  -  click a jack to plug in  -  drag the corner to resize",
+           R(560, 364, 516, 22).toFloat(), 10.0f * s, kCreamDark.withAlpha(0.45f), Justification::centredRight, false);
+    g.setColour(Colours::white.withAlpha(0.05f)); g.drawHorizontalLine(status_.getY() - S(6), sf.getX() + 24 * s, sf.getRight() - 24 * s);
 }
 
 void CD57Editor::paint(Graphics& g)
 {
-    if (background_.getWidth() != getWidth() || background_.getHeight() != getHeight()) renderBackground();
-    g.drawImageAt(background_, 0, 0);
+    paintCabinet(g);
+    for (auto* k : {&kInst_, &kMic_, &kTone_}) engrave(g, k->l.getText(), k->l.getBounds().toFloat(), 12.0f * sc_);
     const float s = sc_;
 
-    // jewel pilot light: faceted red lens in a chrome bezel; brightness follows the modelled pilot lamp
-    const float pil = jlimit(0.0f, 1.0f, proc_.diag.pilot.load());
-    const auto jc = Point<float>((float)S(800), (float)S(176));
-    const float jr = 19.0f * s;
-    if (pil > 0.05f) {
-        g.setGradientFill(ColourGradient(kJewel.withAlpha(0.45f * pil), jc.x, jc.y, Colours::transparentBlack, jc.x + jr * 2.6f, jc.y, true));
-        g.fillEllipse(Rectangle<float>(jr * 5.2f, jr * 5.2f).withCentre(jc));
+    // jewel pilot light: glass lens in a knurled chrome bezel; the lit lens and its glow follow the modelled lamp
+    {
+        static const Image jOff = CD57_IMG(jewel_off_png), jOn = CD57_IMG(jewel_on_png), glow = CD57_IMG(jewel_glow_png);
+        const float pil = jlimit(0.0f, 1.0f, proc_.diag.pilot.load());
+        const auto jc = Point<float>((float)S(800), (float)S(176));
+        const float js = 50.0f * s;
+        g.setColour(Colours::black.withAlpha(0.35f)); g.fillEllipse(Rectangle<float>(js * 0.92f, js * 0.92f).withCentre(jc.translated(2.0f * s, 3.5f * s)));
+        drawImg(g, jOff, Rectangle<float>(js, js).withCentre(jc));
+        if (pil > 0.01f) {
+            drawImg(g, jOn, Rectangle<float>(js, js).withCentre(jc), pil);
+            drawImg(g, glow, Rectangle<float>(js * 3.0f, js * 3.0f).withCentre(jc), 0.75f * pil);
+        }
+        engrave(g, "PILOT", R(760, 210, 80, 16).toFloat(), 10.5f * s);
     }
-    g.setGradientFill(ColourGradient(kChrome, jc.x - jr * 1.3f, jc.y - jr * 1.3f, kChromeDark, jc.x + jr * 1.3f, jc.y + jr * 1.3f, false));
-    g.fillEllipse(Rectangle<float>(jr * 2.6f, jr * 2.6f).withCentre(jc));
-    g.setColour(kInk.withAlpha(0.4f)); g.drawEllipse(Rectangle<float>(jr * 2.6f, jr * 2.6f).withCentre(jc), 1.0f);
-    const Colour lens = Colour(0xff3a0806).interpolatedWith(kJewel, pil);
-    g.setGradientFill(ColourGradient(lens.brighter(0.4f), jc.x - jr * 0.4f, jc.y - jr * 0.4f, lens.darker(0.6f), jc.x + jr, jc.y + jr, true));
-    g.fillEllipse(Rectangle<float>(jr * 2.0f, jr * 2.0f).withCentre(jc));
-    for (int i = 0; i < 8; ++i) {   // facets
-        const float a = MathConstants<float>::twoPi * (float)i / 8.0f;
-        g.setColour(Colours::black.withAlpha(0.18f));
-        g.drawLine(jc.x + std::cos(a) * jr * 0.45f, jc.y + std::sin(a) * jr * 0.45f, jc.x + std::cos(a) * jr * 0.98f, jc.y + std::sin(a) * jr * 0.98f, 1.0f * s);
-    }
-    g.setColour(Colours::white.withAlpha(0.15f + 0.45f * pil)); g.fillEllipse(jc.x - jr * 0.55f, jc.y - jr * 0.65f, jr * 0.5f, jr * 0.35f);
-    g.setFont(F(11.5f * s, true));
-    g.setColour(Colours::white.withAlpha(0.5f)); g.drawText("PILOT", R(760, 212, 80, 16).translated(0, 1), Justification::centred);
-    g.setColour(kEngrave); g.drawText("PILOT", R(760, 212, 80, 16), Justification::centred);
 
     // strip content painted directly
     if (tab_ == 2) {
