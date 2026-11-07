@@ -83,7 +83,7 @@ GitHub Actions (`.github/workflows/build.yml`) builds all three platforms and ru
 * Changing the oversampling factor **keeps the circuit state** (rails, capacitor charge, transformer flux, coil temperature): the new engine adopts it, its up-sampler is primed with recent input, and the old engine is cross-faded out over 512 samples.
 
 **CPU** (one core of a shared cloud container, 512-sample blocks at 48 kHz, heavy drive with control automation, `validate_realtime`): mean / p99.9 of the real-time budget —
-1×: 40 % / 112 %, **2× (default): 47 % / 95 %**, 4×: 68 % / 131 %, 8×: 116 % / 273 %. 8× is therefore labelled *offline*. Timings are reported, not gated, because shared runners are noisy.
+1×: 29 % / 57 % (p99), **2× (default): 40 % / 55 % (p99)**, 4×: 56 % / 74 % (p99), 8×: 84 % / 113 % (p99) — measured 6 November 2026 after the tabulated device-law evaluation (`docs/DOSSIER_COMPLIANCE.md` §8; the same run of `main` before it gave 39 / 55 / 76 / 115 % mean). 8× is still labelled *offline*. Timings are reported, not gated, because shared runners are noisy.
 
 ## Validation
 

@@ -546,3 +546,27 @@ and a test that can fail covers it; nothing here changes the conclusion of Secti
 
 The first sensitivity run reported a 60 dB effect for a 0.8-1.2 MOhm pot range. The cause was in the loader, not the model: an `interval` was only read for entries whose status was `assumed`, so the historical-nominal pot total was loaded as the range 0..0 ohm.
 The loader now reads an interval wherever one is given, and the sensitivity tool refuses to run with a missing range. A one-parameter study that had silently used a zero range would have published a wrong measurement priority.
+
+## 8. Performance follow-up (6 November 2026): tabulated device-law factors in the realtime solve
+
+**What changed.** The transient solver (`Network::evalSystem`) now evaluates the Koren cathode-current law, the grid-conduction law and the 6V6 screen-fraction law through
+exact algebraic factorisations whose transcendental factors are 1-D cubic-Hermite tables (value and derivative at each knot): `A(u) = softplus(u)^ex`, `B(v) = v^ex`,
+`G(u) = softplus(u)^1.5`, `E(v) = exp(-(v/vk)^q)` (`src/dsp/HermiteTable.h`, `evalTriodeFast` / `evalPentodeFast` in `src/dsp/Devices.h`). Outside the tabulated ranges
+(deep cutoff, plate/screen below 4 V, extreme positive grid) the exact closed form is used, so nothing is extrapolated. **No device parameter, fitted value or evidence label
+changed**; the tables are a numerical evaluation method, not a model change. The independent AC solver and every device-law validation still use the closed forms.
+
+**Accuracy evidence.** `validate_tubes` (CTest `tube_device_laws`) has three new checks comparing the table path with the closed form over the full operating grid:
+worst relative error 1.7e-7 (12AY7, 12AX7) and 1.9e-7 (6V6) in the currents, 6.2e-6 / 6.5e-6 in the Jacobian entries. Rendered output (10 s, heavy plucked drive,
+2x and 4x) differs from the previous build by at most one float LSB (-142.6 dB re peak, NRMSE 1.7e-8). `cd57_validate` reproduces every number of `VALIDATION_REPORT.md`
+(only the run time changed) and `validate_numerics` reproduces every aliasing / truncation figure of `NUMERICS_REPORT.md` to 0.1 dB.
+
+**Speed (same box, A/B against `main` 1261ca6, `validate_realtime`, 512-sample blocks at 48 kHz, heavy drive + automation, mean / p99 of the 10.67 ms budget):**
+1x 39.2 % / 73.2 % -> 29.0 % / 56.8 %; 2x (default) 54.7 % / 82.6 % -> 39.6 % / 55.3 %; 4x 76.0 % / 102.6 % -> 55.7 % / 73.5 %; 8x 115.1 % / 150.7 % -> 84.4 % / 112.6 %.
+Offline `cd57_render` (10 s, inst 0.8, CPU time): 2x 2.44 s -> 1.70 s, 4x 4.27 s -> 2.86 s (about 1.4-1.5x). Worst-block figures are noisy on this shared container.
+
+**R99 (aliases below -80 dBFS) is unchanged.** `validate_numerics` §F already shows the residual is time-step truncation of the integrator, not convergence or table
+accuracy, so this change cannot move it. What it changes is the price: 4x oversampling now costs about what 2x cost before (mean 55.7 % vs 54.7 %), and 8x drops below
+real time on average. The default oversampling factor was **not** changed (it would change latency and CPU for existing sessions); this is left to the owner.
+
+**R89 / RAM.** The tables are built once per tube exponent outside the audio thread (about 0.14 MB in total, shared by all instances); process peak RSS of a minimal
+engine harness moved from 2.6-2.8 MB to 2.8-3.0 MB. No allocation was added to the audio path.
